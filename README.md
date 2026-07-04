@@ -1,4 +1,4 @@
-# ai_dekstop_server
+# ai_desktop_server
 scripts
 
 

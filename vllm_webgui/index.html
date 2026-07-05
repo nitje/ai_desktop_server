@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>vLLM WebGUI</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1>vLLM WebGUI</h1>
+      <p id="statusLine">Lade Status...</p>
+    </div>
+    <div class="header-actions">
+      <button id="themeToggleBtn" class="secondary">Day</button>
+      <button id="refreshBtn">Aktualisieren</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel status-grid">
+      <div>
+        <h2>NVIDIA / Docker</h2>
+        <div id="nvidiaStatus">Lade...</div>
+      </div>
+      <button id="repairNvidiaBtn">NVIDIA Docker reparieren</button>
+    </section>
+
+    <section class="panel">
+      <h2>Container</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Container Status</th>
+              <th>API Status</th>
+              <th>Profil</th>
+              <th>Modell</th>
+              <th>Port</th>
+              <th>Autostart</th>
+              <th>Aktionen</th>
+            </tr>
+          </thead>
+          <tbody id="containerRows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="grid">
+      <form id="containerForm" class="panel">
+        <h2>Container anlegen / bearbeiten</h2>
+        <input type="hidden" id="oldName">
+
+        <label>Name
+          <input id="name" required placeholder="vllm-qwen3-0.6b">
+        </label>
+
+        <label>Profil
+          <select id="profile">
+            <option value="nvidia">NVIDIA CUDA</option>
+            <option value="rocm">AMD ROCm</option>
+            <option value="xpu">Intel XPU</option>
+            <option value="cpu">CPU</option>
+          </select>
+        </label>
+
+        <label>Docker Image
+          <input id="image" placeholder="vllm/vllm-openai:latest">
+        </label>
+
+        <label>Hugging Face Modell
+          <input id="model" value="Qwen/Qwen3-0.6B">
+        </label>
+
+        <label>Host-Port
+          <input id="port" type="number" min="1" max="65535" value="18000">
+        </label>
+
+        <label>HF_TOKEN
+          <input id="hfToken" type="password" autocomplete="off" placeholder="leer lassen = unveraendert/ohne Token">
+        </label>
+
+        <label>vLLM Zusatzargumente
+          <input id="extraArgs" placeholder="z.B. --max-model-len 8192">
+        </label>
+
+        <label>Docker Zusatzargumente
+          <input id="dockerExtraArgs" placeholder="z.B. --shm-size=8g">
+        </label>
+
+        <label class="check">
+          <input id="autostart" type="checkbox">
+          Autostart fuer diesen Container
+        </label>
+
+        <div class="actions">
+          <button type="submit">Speichern</button>
+          <button type="button" id="resetFormBtn">Neu</button>
+        </div>
+      </form>
+
+      <section class="panel">
+        <h2>Fortschritt / Logs</h2>
+        <div id="jobLine">Keine laufende Aktion.</div>
+        <pre id="logBox"></pre>
+      </section>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

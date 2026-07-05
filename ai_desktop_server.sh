@@ -56,6 +56,8 @@ OPENOFFICE_URL="${OPENOFFICE_URL:-https://sourceforge.net/projects/openofficeorg
 
 LOGIND_NO_SLEEP_CONF="${LOGIND_NO_SLEEP_CONF:-/etc/systemd/logind.conf.d/no-sleep.conf}"
 DASH_TO_PANEL_UUID="${DASH_TO_PANEL_UUID:-dash-to-panel@jderose9.github.com}"
+NETSPEED_UUID="${NETSPEED_UUID:-netspeed@hedayaty.gmail.com}"
+NETSPEED_SEARCH="${NETSPEED_SEARCH:-netspeed}"
 
 if [[ "${EUID}" -eq 0 ]]; then
   SUDO=""
@@ -380,6 +382,54 @@ dash_to_panel_status() {
   fi
 }
 
+netspeed_installed() {
+  local dir
+  if package_installed gnome-shell-extension-netspeed || [[ -d "/usr/share/gnome-shell/extensions/${NETSPEED_UUID}" ]]; then
+    return 0
+  fi
+
+  for dir in \
+    /usr/share/gnome-shell/extensions/*netspeed* \
+    /usr/share/gnome-shell/extensions/*net-speed* \
+    /usr/local/share/gnome-shell/extensions/*netspeed* \
+    /usr/local/share/gnome-shell/extensions/*net-speed* \
+    "${USER_HOME}/.local/share/gnome-shell/extensions/"*netspeed* \
+    "${USER_HOME}/.local/share/gnome-shell/extensions/"*net-speed*; do
+    if [[ -d "${dir}" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+netspeed_uuid() {
+  local dir
+  for dir in \
+    "/usr/share/gnome-shell/extensions/${NETSPEED_UUID}" \
+    /usr/share/gnome-shell/extensions/*netspeed* \
+    /usr/share/gnome-shell/extensions/*net-speed* \
+    /usr/local/share/gnome-shell/extensions/*netspeed* \
+    /usr/local/share/gnome-shell/extensions/*net-speed* \
+    "${USER_HOME}/.local/share/gnome-shell/extensions/"*netspeed* \
+    "${USER_HOME}/.local/share/gnome-shell/extensions/"*net-speed*; do
+    if [[ -d "${dir}" ]]; then
+      basename "${dir}"
+      return 0
+    fi
+  done
+
+  echo "${NETSPEED_UUID}"
+}
+
+netspeed_status() {
+  if netspeed_installed; then
+    echo "installiert"
+  else
+    echo "fehlt"
+  fi
+}
+
 safe_rm_dir() {
   local path="$1"
   local label="$2"
@@ -493,7 +543,8 @@ scan_status() {
   printf "%-24s %s\n" "LM Autostart" "$(service_exists "${LMSTUDIO_SERVICE}" && systemctl is-enabled lmstudio.service 2>/dev/null || echo fehlt)"
   printf "%-24s %s\n" "ComfyUI Autostart" "$(service_exists "${COMFY_SERVICE}" && systemctl is-enabled comfyui.service 2>/dev/null || echo fehlt)"
   printf "%-24s %s\n" "Energiesparen" "$(power_saving_status)"
-  printf "%-24s %s\n" "Windows Taskleiste" "$(dash_to_panel_status)"
+  printf "%-24s %s\n" "Windows-artige Taskleiste" "$(dash_to_panel_status)"
+  printf "%-24s %s\n" "NetSpeed Anzeige" "$(netspeed_status)"
   echo
   echo "Zielbenutzer: ${TARGET_USER}"
   echo "Home:         ${USER_HOME}"
@@ -1947,8 +1998,8 @@ manage_power_saving() {
   echo "i) Energiesparfunktionen deaktivieren"
   echo "r) Energiesparfunktionen Systemstandard wiederherstellen"
   echo "s) ueberspringen"
-  read -r -p "Auswahl [3]: " choice
-  choice="${choice:-3}"
+  read -r -p "Auswahl [s]: " choice
+  choice="${choice:-s}"
 
   case "${choice}" in
     i) disable_global_power_saving ;;
@@ -2088,14 +2139,263 @@ manage_windows_taskbar() {
   echo "i) Windows-artige Taskleiste installieren/aktivieren"
   echo "r) Windows-artige Taskleiste deaktivieren/entfernen"
   echo "s) ueberspringen"
-  read -r -p "Auswahl [3]: " choice
-  choice="${choice:-3}"
+  read -r -p "Auswahl [s]: " choice
+  choice="${choice:-s}"
 
   case "${choice}" in
     i) enable_windows_taskbar ;;
     r) disable_windows_taskbar ;;
     s|skip) echo "Windows-artige Taskleiste: uebersprungen." ;;
     *) echo "Ungueltige Auswahl, Windows-artige Taskleiste uebersprungen." ;;
+  esac
+}
+
+install_gnome_extension_from_extensions_site() {
+  local search="$1"
+  local preferred_uuid="$2"
+  local tmp_dir
+  local info_file
+  local uuid
+  local download_url
+  local target_dir
+
+  apt_install ca-certificates curl unzip python3 gnome-shell-extension-prefs
+
+  tmp_dir="$(mktemp -d)"
+  info_file="${tmp_dir}/extension-info.txt"
+
+  if ! python3 - "${search}" "${preferred_uuid}" >"${info_file}" <<'PY'
+import json
+import re
+import sys
+import urllib.parse
+import urllib.request
+import zipfile
+from io import BytesIO
+
+search = sys.argv[1]
+preferred_uuid = sys.argv[2]
+
+def fetch_json(url):
+    with urllib.request.urlopen(url, timeout=30) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+def shell_versions():
+    versions = []
+    try:
+        import subprocess
+        out = subprocess.check_output(["gnome-shell", "--version"], text=True).strip()
+        match = re.search(r"(\d+(?:\.\d+)*)", out)
+        if match:
+            full = match.group(1)
+            versions.append(full)
+            versions.append(full.split(".", 1)[0])
+    except Exception:
+        pass
+    versions.extend(["48", "47", "46", "45", "44", "43"])
+    result = []
+    for version in versions:
+        if version and version not in result:
+            result.append(version)
+    return result
+
+def fetch_extension_candidates(searches):
+    seen = set()
+    result = []
+    for term in searches:
+        query_url = "https://extensions.gnome.org/extension-query/?" + urllib.parse.urlencode({"search": term})
+        try:
+            data = fetch_json(query_url)
+        except Exception:
+            continue
+        for ext in data.get("extensions", []):
+            uuid = ext.get("uuid")
+            if uuid and uuid not in seen:
+                seen.add(uuid)
+                result.append(ext)
+    return result
+
+extensions = fetch_extension_candidates([search, "net speed", "network speed", "netspeed"])
+if not extensions:
+    raise SystemExit(f"Keine GNOME-Erweiterung gefunden fuer Suche: {search}")
+
+def score(ext):
+    name = (ext.get("name") or "").lower()
+    uuid = (ext.get("uuid") or "").lower()
+    if preferred_uuid and ext.get("uuid") == preferred_uuid:
+        return 100
+    if name == "netspeed" or uuid == "netspeed@hedayaty.gmail.com":
+        return 90
+    if "netspeed" in name or "netspeed" in uuid:
+        return 80
+    if "net speed" in name or "net-speed" in uuid:
+        return 70
+    return 10
+
+extensions.sort(key=score, reverse=True)
+
+last_error = None
+
+def zip_looks_compatible(download_url, shell_version):
+    try:
+        blob = urllib.request.urlopen(download_url, timeout=30).read()
+        with zipfile.ZipFile(BytesIO(blob)) as zf:
+            metadata = json.loads(zf.read("metadata.json").decode("utf-8"))
+            shell_versions = [str(v) for v in metadata.get("shell-version", [])]
+            if shell_versions and shell_version not in shell_versions and shell_version.split(".", 1)[0] not in shell_versions:
+                return False
+            for name in zf.namelist():
+                if name.endswith(".js"):
+                    text = zf.read(name).decode("utf-8", errors="ignore")
+                    if "imports.misc.extensionUtils" in text:
+                        return False
+        return True
+    except Exception as exc:
+        global last_error
+        last_error = exc
+        return False
+
+for chosen in extensions:
+    uuid = chosen.get("uuid")
+    if not uuid:
+        continue
+    for shell_version in shell_versions():
+        url = "https://extensions.gnome.org/extension-info/?" + urllib.parse.urlencode({
+            "uuid": uuid,
+            "shell_version": shell_version,
+        })
+        try:
+            info = fetch_json(url)
+        except Exception as exc:
+            last_error = exc
+            continue
+        download_url = info.get("download_url")
+        if not download_url:
+            continue
+        if download_url.startswith("/"):
+            download_url = "https://extensions.gnome.org" + download_url
+        if zip_looks_compatible(download_url, shell_version):
+            print(uuid)
+            print(download_url)
+            raise SystemExit(0)
+
+raise SystemExit(f"Keine kompatible moderne NetSpeed/Network-Speed-Erweiterung gefunden. Letzter Fehler: {last_error}")
+PY
+  then
+    echo "Download-Informationen fuer GNOME-Erweiterung konnten nicht ermittelt werden."
+    cat "${info_file}" 2>/dev/null || true
+    rm -rf "${tmp_dir}"
+    return 1
+  fi
+
+  uuid="$(sed -n '1p' "${info_file}")"
+  download_url="$(sed -n '2p' "${info_file}")"
+  if [[ -z "${uuid}" || -z "${download_url}" ]]; then
+    echo "Ungueltige Download-Informationen fuer GNOME-Erweiterung."
+    cat "${info_file}" 2>/dev/null || true
+    rm -rf "${tmp_dir}"
+    return 1
+  fi
+
+  echo "GNOME-Erweiterung: ${uuid}"
+  echo "Download: ${download_url}"
+
+  run_root curl -fL "${download_url}" -o "${tmp_dir}/extension.zip"
+  target_dir="/usr/share/gnome-shell/extensions/${uuid}"
+  run_root rm -rf "${target_dir}"
+  run_root install -d -m 0755 "${target_dir}"
+  run_root unzip -q "${tmp_dir}/extension.zip" -d "${target_dir}"
+  run_root chmod -R a+rX "${target_dir}"
+  if [[ -d "${target_dir}/schemas" ]] && command_ok glib-compile-schemas; then
+    run_root glib-compile-schemas "${target_dir}/schemas" || true
+  fi
+
+  NETSPEED_UUID="${uuid}"
+  rm -rf "${tmp_dir}"
+}
+
+enable_netspeed_indicator() {
+  local uuid
+  section "NetSpeed Anzeige aktivieren"
+
+  echo "Installiere NetSpeed GNOME-Erweiterung und GNOME-Erweiterungen-App."
+  apt_install gnome-shell-extension-prefs
+  if apt_package_has_candidate gnome-shell-extension-netspeed; then
+    apt_install gnome-shell-extension-netspeed
+  else
+    echo "Paket gnome-shell-extension-netspeed ist in den aktuellen APT-Quellen nicht verfuegbar."
+    echo "Installiere NetSpeed stattdessen ueber extensions.gnome.org."
+    set_dash_to_panel_live "${NETSPEED_UUID}" disable || set_dash_to_panel_gsettings "${NETSPEED_UUID}" disable || true
+    install_gnome_extension_from_extensions_site "${NETSPEED_SEARCH}" "${NETSPEED_UUID}" || return 1
+  fi
+
+  uuid="$(netspeed_uuid)"
+  echo "NetSpeed UUID: ${uuid}"
+
+  if set_dash_to_panel_live "${uuid}" enable || set_dash_to_panel_gsettings "${uuid}" enable; then
+    echo "NetSpeed wurde fuer Benutzer '${TARGET_USER}' aktiviert."
+  else
+    echo "NetSpeed wurde installiert, konnte aber nicht automatisch aktiviert werden."
+    echo "Melde dich als '${TARGET_USER}' am Desktop an und starte:"
+    echo "  gnome-extensions-app"
+    echo "Dort 'NetSpeed' aktivieren."
+  fi
+
+  echo "Falls die Anzeige nicht sofort sichtbar ist: einmal abmelden/anmelden."
+}
+
+disable_netspeed_indicator() {
+  local uuid
+  local target_dir
+  local dir
+  section "NetSpeed Anzeige deaktivieren"
+
+  uuid="$(netspeed_uuid)"
+  echo "NetSpeed UUID: ${uuid}"
+
+  set_dash_to_panel_live "${uuid}" disable || set_dash_to_panel_gsettings "${uuid}" disable || true
+
+  if ask_yes_no "NetSpeed GNOME-Erweiterung per apt entfernen?" "y"; then
+    apt_remove gnome-shell-extension-netspeed || true
+    echo "Paket entfernt: gnome-shell-extension-netspeed"
+  else
+    echo "Paket bleibt installiert, NetSpeed wurde nur in GNOME deaktiviert."
+  fi
+
+  target_dir="/usr/share/gnome-shell/extensions/${uuid}"
+  if [[ -d "${target_dir}" ]] && ask_yes_no "Manuell installierte NetSpeed-Erweiterung '${target_dir}' entfernen?" "y"; then
+    run_root rm -rf --one-file-system "${target_dir}"
+    echo "NetSpeed-Erweiterungsordner entfernt: ${target_dir}"
+  fi
+
+  for dir in /usr/share/gnome-shell/extensions/*netspeed* /usr/share/gnome-shell/extensions/*net-speed*; do
+    if [[ -d "${dir}" && "${dir}" != "${target_dir}" ]] && ask_yes_no "Weitere NetSpeed-Erweiterung '${dir}' entfernen?" "y"; then
+      run_root rm -rf --one-file-system "${dir}"
+      echo "NetSpeed-Erweiterungsordner entfernt: ${dir}"
+    fi
+  done
+
+  echo "Falls die Anzeige nicht sofort verschwindet: einmal abmelden/anmelden."
+}
+
+manage_netspeed_indicator() {
+  local choice
+  section "NetSpeed Anzeige Installieren?"
+  echo "Status: $(netspeed_status)"
+  echo "Installiert wird: gnome-shell-extension-netspeed gnome-shell-extension-prefs"
+  echo "Zielbenutzer: ${TARGET_USER}"
+  echo
+  echo "i) NetSpeed Anzeige installieren/aktivieren"
+  echo "r) NetSpeed Anzeige deaktivieren/entfernen"
+  echo "s) ueberspringen"
+  read -r -p "Auswahl [s]: " choice
+  choice="${choice:-s}"
+
+  case "${choice}" in
+    i) enable_netspeed_indicator ;;
+    r) disable_netspeed_indicator ;;
+    s|skip) echo "NetSpeed Anzeige: uebersprungen." ;;
+    *) echo "Ungueltige Auswahl, NetSpeed Anzeige uebersprungen." ;;
   esac
 }
 
@@ -2132,6 +2432,7 @@ main() {
   handle_app "ComfyUI" "$([[ -d "${COMFY_DIR}" ]] && echo yes || echo no)" install_comfyui uninstall_comfyui
   manage_power_saving
   manage_windows_taskbar
+  manage_netspeed_indicator
 
   section "Fertig"
   scan_status

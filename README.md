@@ -4,6 +4,8 @@ scripts
 
 
 Video zum Setup: https://youtu.be/MUCXDlkUb0w
+<br>
+Video zum Setup in Visual Studio Code: https://youtu.be/IvAOa-rEq-c
 <br><br><br>
 Im Persöhnlichen Ordner wird auch ein link zu ComfyUI erstellt wo ihr Model und output findet.
 

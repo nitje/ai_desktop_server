@@ -7,6 +7,8 @@ const refreshBtn = document.getElementById("refreshBtn");
 const resetFormBtn = document.getElementById("resetFormBtn");
 const repairNvidiaBtn = document.getElementById("repairNvidiaBtn");
 const themeToggleBtn = document.getElementById("themeToggleBtn");
+const downloadLogBtn = document.getElementById("downloadLogBtn");
+const clearLogBtn = document.getElementById("clearLogBtn");
 const modelFormat = document.getElementById("modelFormat");
 const ggufFields = document.getElementById("ggufFields");
 const modelLabel = document.getElementById("modelLabel");
@@ -15,6 +17,7 @@ const modelHint = document.getElementById("modelHint");
 let state = null;
 let selectedName = null;
 let selectedJob = null;
+let currentLogTitle = "vllm-log";
 
 const defaults = {
   nvidia: "vllm/vllm-openai:latest",
@@ -60,6 +63,35 @@ function fileNameFromUrl(value) {
   }
 }
 
+function safeFilePart(value) {
+  return String(value || "vllm-log").replace(/[^A-Za-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "") || "vllm-log";
+}
+
+function downloadCurrentLog() {
+  const text = logBox.textContent || "";
+  if (!text.trim()) {
+    alert("Kein Log zum Herunterladen vorhanden.");
+    return;
+  }
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const blob = new Blob([`${jobLine.textContent}\n\n${text}\n`], {type: "text/plain;charset=utf-8"});
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `${safeFilePart(currentLogTitle)}-${timestamp}.txt`;
+  document.body.appendChild(link);
+  link.click();
+  URL.revokeObjectURL(link.href);
+  link.remove();
+}
+
+function clearVisibleLog() {
+  selectedJob = null;
+  selectedName = null;
+  currentLogTitle = "vllm-log";
+  jobLine.textContent = "Log-Anzeige geleert.";
+  logBox.textContent = "";
+}
+
 function renderGgufSource(c) {
   if (c.gguf_url) {
     const label = shortText(fileNameFromUrl(c.gguf_url), 44);
@@ -95,6 +127,7 @@ function fillForm(item = {}) {
   document.getElementById("ggufFile").value = item.gguf_file || "";
   document.getElementById("ggufUrl").value = item.gguf_url || "";
   document.getElementById("tokenizer").value = item.tokenizer || "";
+  document.getElementById("hfConfigPath").value = item.hf_config_path || "";
   document.getElementById("port").value = item.port || 18000;
   document.getElementById("hfToken").value = "";
   document.getElementById("extraArgs").value = item.extra_args || "";
@@ -116,6 +149,7 @@ function formData() {
     gguf_file: document.getElementById("ggufFile").value.trim(),
     gguf_url: document.getElementById("ggufUrl").value.trim(),
     tokenizer: document.getElementById("tokenizer").value.trim(),
+    hf_config_path: document.getElementById("hfConfigPath").value.trim(),
     port: Number(document.getElementById("port").value),
     hf_token: document.getElementById("hfToken").value,
     extra_args: document.getElementById("extraArgs").value,
@@ -170,6 +204,7 @@ function renderRows() {
       <td>
         ${badge(c.api_ready ? "API bereit" : "API nicht bereit", c.api_ready ? "running" : "missing")}
         ${c.api_ready ? `<br><a class="api-link" href="${escapeHtml(c.api_models_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(c.api_models_url)}</a>` : ""}
+        ${c.diagnostic ? `<br><small class="diagnostic">${escapeHtml(c.diagnostic)}</small>` : ""}
       </td>
       <td>${progressBar(c.download_progress)}</td>
       <td>${escapeHtml(c.profile)}</td>
@@ -216,6 +251,7 @@ async function refreshJob() {
   if (!selectedJob) return;
   const job = await api(`/api/jobs/${selectedJob}`);
   jobLine.textContent = `${job.label || "Job"}: ${job.status}`;
+  currentLogTitle = job.label || "vllm-job";
   logBox.textContent = (job.log || []).join("\n");
   logBox.scrollTop = logBox.scrollHeight;
   if (job.status === "done" || job.status === "error") {
@@ -227,6 +263,7 @@ async function loadLogs(name) {
   const data = await api(`/api/containers/${encodeURIComponent(name)}/logs`);
   if (!selectedJob) {
     jobLine.textContent = `Logs: ${name}`;
+    currentLogTitle = name;
     logBox.textContent = data.logs || "";
     logBox.scrollTop = logBox.scrollHeight;
   }
@@ -235,9 +272,16 @@ async function loadLogs(name) {
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
-    await api("/api/containers", {method: "POST", body: JSON.stringify(formData())});
+    const result = await api("/api/containers", {method: "POST", body: JSON.stringify(formData())});
     document.getElementById("hfToken").value = "";
     await refresh();
+    if (result.removed_cache && result.removed_cache.length) {
+      selectedJob = null;
+      selectedName = null;
+      jobLine.textContent = "Alter Hugging-Face-Cache geloescht";
+      logBox.textContent = result.removed_cache.map((name) => `geloescht: ${name}`).join("\n");
+      logBox.scrollTop = logBox.scrollHeight;
+    }
   } catch (error) {
     alert(error.message);
   }
@@ -284,6 +328,8 @@ resetFormBtn.addEventListener("click", () => fillForm());
 themeToggleBtn.addEventListener("click", () => {
   applyTheme(document.documentElement.dataset.theme === "dark" ? "day" : "dark");
 });
+downloadLogBtn.addEventListener("click", downloadCurrentLog);
+clearLogBtn.addEventListener("click", clearVisibleLog);
 repairNvidiaBtn.addEventListener("click", async () => {
   try {
     const data = await api("/api/nvidia/repair", {method: "POST", body: "{}"});

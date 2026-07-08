@@ -85,7 +85,7 @@
 
         <div id="ggufFields" class="field-group hidden">
           <label>GGUF Repo
-            <input id="ggufRepo" placeholder="z.B. unsloth/Qwen3-0.6B-GGUF">
+            <input id="ggufRepo" placeholder="z.B. Qwen/Qwen3-8B-GGUF">
           </label>
 
           <label>GGUF Datei oder Quantisierung
@@ -97,7 +97,11 @@
           </label>
 
           <label>Tokenizer / Base Model
-            <input id="tokenizer" placeholder="z.B. Qwen/Qwen3-0.6B">
+            <input id="tokenizer" placeholder="z.B. Qwen/Qwen3-8B-Base">
+          </label>
+
+          <label>HF Config Path
+            <input id="hfConfigPath" placeholder="optional: exaktes Base-Modell mit passender config.json (Qwen/Qwen3-8B-Base)">
           </label>
         </div>
 
@@ -129,7 +133,13 @@
       </form>
 
       <section class="panel">
-        <h2>Fortschritt / Logs</h2>
+        <div class="panel-title">
+          <h2>Fortschritt / Logs</h2>
+          <div class="actions">
+            <button type="button" id="downloadLogBtn" class="secondary">Log Download</button>
+            <button type="button" id="clearLogBtn" class="secondary">Log Leeren</button>
+          </div>
+        </div>
         <div id="jobLine">Keine laufende Aktion.</div>
         <pre id="logBox"></pre>
       </section>

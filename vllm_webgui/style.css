@@ -91,6 +91,18 @@ main {
   padding: 16px;
 }
 
+.panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.panel-title h2 {
+  margin-bottom: 0;
+}
+
 .table-wrap {
   overflow-x: auto;
 }
@@ -290,6 +302,17 @@ small {
   overflow-wrap: anywhere;
 }
 
+small.diagnostic {
+  display: inline-block;
+  margin-top: 4px;
+  color: #ffcf99;
+  max-width: 320px;
+}
+
+:root[data-theme="day"] small.diagnostic {
+  color: #8a4b00;
+}
+
 .api-link,
 .model-link {
   display: inline-block;
@@ -317,5 +340,10 @@ small {
 
   .grid {
     grid-template-columns: 1fr;
+  }
+
+  .panel-title {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

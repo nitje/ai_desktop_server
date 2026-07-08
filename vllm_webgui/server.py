@@ -116,6 +116,62 @@ def rename_cache_dir(old_name, new_name):
     old_dir.rename(new_dir)
 
 
+def hf_repo_cache_name(repo_id):
+    return "models--" + repo_id.replace("/", "--")
+
+
+def repo_id_from_cache_name(name):
+    if not name.startswith("models--"):
+        return ""
+    return name.removeprefix("models--").replace("--", "/")
+
+
+def is_hf_repo_id(value):
+    text = str(value or "").strip()
+    if not text or text.startswith("/") or "://" in text:
+        return False
+    if ":" in text:
+        text = text.split(":", 1)[0]
+    return "/" in text and not text.startswith(".")
+
+
+def hf_repo_refs(item):
+    refs = set()
+    candidates = []
+    if item.get("model_format") == "hf":
+        candidates.append(item.get("model", ""))
+    if item.get("model_format") == "gguf":
+        candidates.extend([
+            item.get("gguf_repo", ""),
+            item.get("tokenizer", ""),
+            item.get("hf_config_path", ""),
+        ])
+    for value in candidates:
+        if is_hf_repo_id(value):
+            refs.add(str(value).strip().split(":", 1)[0])
+    return refs
+
+
+def cleanup_stale_hf_cache(item):
+    cache_dir = HF_CACHE_BASE / item["name"]
+    if not cache_dir.exists() or not cache_dir.is_dir():
+        return []
+
+    keep = {hf_repo_cache_name(repo) for repo in hf_repo_refs(item)}
+    removed = []
+    for base in (cache_dir, cache_dir / "hub"):
+        if not base.exists() or not base.is_dir():
+            continue
+        for child in base.iterdir():
+            if not child.is_dir() or not child.name.startswith("models--"):
+                continue
+            if child.name in keep:
+                continue
+            shutil.rmtree(child)
+            removed.append(repo_id_from_cache_name(child.name) or str(child))
+    return removed
+
+
 def delete_config(name):
     cfg = load_config()
     cfg["containers"] = [c for c in cfg.get("containers", []) if c.get("name") != name]
@@ -146,6 +202,7 @@ def validate_container(data, old_name=None):
         "gguf_file": str(data.get("gguf_file", "")).strip(),
         "gguf_url": str(data.get("gguf_url", "")).strip(),
         "tokenizer": str(data.get("tokenizer", "")).strip(),
+        "hf_config_path": str(data.get("hf_config_path", "")).strip(),
         "port": int(data.get("port", 8000)),
         "hf_token": str(data.get("hf_token", "")),
         "extra_args": str(data.get("extra_args", "")),
@@ -252,6 +309,7 @@ def config_hash(item):
         "gguf_file",
         "gguf_url",
         "tokenizer",
+        "hf_config_path",
         "port",
         "extra_args",
         "docker_extra_args",
@@ -369,9 +427,63 @@ def prepare_model(job_id, item):
     return item["model"], []
 
 
+def write_gguf_patch_script(cache_dir):
+    patch_script = cache_dir / "vllm-gguf-patch.py"
+    patch_script.write_text(
+        """#!/usr/bin/env python3
+import pathlib
+import re
+
+import vllm_gguf_plugin.weights_adapter.default as default_adapter
+
+
+path = pathlib.Path(default_adapter.__file__)
+source = path.read_text()
+before = source
+
+if "_vllm_webgui_qwen35_text_config_patch" not in source:
+    source = re.sub(
+        r"(text_config = config\\.get_text_config\\(\\)\\n)",
+        r"\\1"
+        "        # _vllm_webgui_qwen35_text_config_patch\\n"
+        "        if getattr(config, \\"model_type\\", None) == \\"qwen3_5\\":\\n"
+        "            for _key, _value in text_config.to_dict().items():\\n"
+        "                if not hasattr(config, _key):\\n"
+        "                    setattr(config, _key, _value)\\n"
+        "            if hasattr(config, \\"vision_config\\"):\\n"
+        "                config.vision_config = None\\n",
+        source,
+        count=1,
+    )
+
+source = re.sub(
+    r"is_multimodal = \\(\\n\\s+hasattr\\(config, \\"vision_config\\"\\)",
+    "is_multimodal = (\\n"
+    "            model_type != \\"qwen3_5\\"\\n"
+    "            and hasattr(config, \\"vision_config\\")",
+    source,
+    count=1,
+)
+
+needle = 'if model_type == "gemma3_text":\\n            model_type = "gemma3"'
+patch = needle + '\\n        if model_type == "qwen3_5":\\n            model_type = "qwen3"'
+if 'if model_type == "qwen3_5"' not in source:
+    source = source.replace(needle, patch)
+
+path.write_text(source)
+print("GGUF plugin patch:", "applied" if source != before else "already-present-or-not-matched")
+""",
+        encoding="utf-8",
+    )
+    os.chmod(patch_script, 0o755)
+    return patch_script
+
+
 def build_run_args(item, model_arg=None, extra_mounts=None):
     cache_dir = HF_CACHE_BASE / item["name"]
     cache_dir.mkdir(parents=True, exist_ok=True)
+    if item.get("model_format") == "gguf":
+        write_gguf_patch_script(cache_dir)
     restart_policy = "unless-stopped" if item.get("autostart") else "no"
     model_arg = model_arg or item["model"]
     extra_mounts = extra_mounts or []
@@ -407,8 +519,9 @@ def build_run_args(item, model_arg=None, extra_mounts=None):
     if item.get("model_format") == "gguf":
         install_and_serve = (
             "if command -v uv >/dev/null 2>&1; then "
-            "uv pip install --system vllm-gguf-plugin || uv pip install vllm-gguf-plugin; "
-            "else python3 -m pip install vllm-gguf-plugin; fi; "
+            "uv pip install --system --upgrade vllm-gguf-plugin || uv pip install --upgrade vllm-gguf-plugin; "
+            "else python3 -m pip install --upgrade vllm-gguf-plugin; fi; "
+            "python3 /root/.cache/huggingface/vllm-gguf-patch.py; "
             "exec vllm serve \"$@\""
         )
         args += [
@@ -421,6 +534,8 @@ def build_run_args(item, model_arg=None, extra_mounts=None):
             "--served-model-name",
             item["model"],
         ]
+        if item.get("hf_config_path"):
+            args += ["--hf-config-path", item["hf_config_path"]]
     else:
         args.append(model_arg)
     if item.get("extra_args"):
@@ -655,6 +770,21 @@ def api_status_ready(item):
     return data.startswith(b"HTTP/1.1 200") or data.startswith(b"HTTP/1.0 200")
 
 
+def diagnose_logs(logs):
+    if "Failed to map GGUF parameters" in logs and "linear_attn" in logs:
+        return "GGUF nicht von vLLM-Plugin unterstuetzt: linear_attn/GDN-Gewichte koennen nicht gemappt werden."
+    if "Unknown gguf model_type: qwen3_5" in logs:
+        return "GGUF-Plugin kennt qwen3_5 nicht. Container neu erstellen, damit der WebGUI-Patch greift."
+    unknown_type = re.search(r"Unknown gguf model_type: ([A-Za-z0-9_.-]+)", logs)
+    if unknown_type:
+        return f"GGUF nicht von vLLM-Plugin unterstuetzt: model_type {unknown_type.group(1)} ist unbekannt."
+    if "Qwen3_5VisionConfig" in logs or "Qwen3_5Config" in logs:
+        return "Qwen3.5/3.6 GGUF braucht Plugin-Kompatibilitaets-Patch. Container neu erstellen."
+    if "CUDA out of memory" in logs or "out of memory" in logs.lower():
+        return "Nicht genug VRAM/RAM. Max Model Len senken oder kleineres/staerker quantisiertes Modell nutzen."
+    return ""
+
+
 def docker_status_for(item):
     name = item["name"]
     status = "missing"
@@ -664,12 +794,14 @@ def docker_status_for(item):
     api_ready = api_status_ready(item) if status == "running" else False
     api_url = f"http://{local_ip()}:{item['port']}/v1"
     progress = download_progress_for(item, status, api_ready)
+    diagnostic = diagnose_logs(tail_logs(name, lines=260)) if status != "missing" and not api_ready else ""
     return {
         "status": status,
         "api_status": "ready" if api_ready else "not_ready",
         "api_ready": api_ready,
         "api_url": api_url if api_ready else "",
         "api_models_url": f"{api_url}/models" if api_ready else "",
+        "diagnostic": diagnostic,
         "download_progress": progress,
         "config_current": labels.get("ai.vllm.webgui.config") == config_hash(item),
         "url": api_url,
@@ -752,8 +884,13 @@ class Handler(SimpleHTTPRequestHandler):
                 old_name = data.get("old_name") or data.get("name")
                 item = validate_container(data, old_name=old_name)
                 rename_cache_dir(old_name, item["name"])
+                removed_cache = cleanup_stale_hf_cache(item)
                 upsert_config(item)
-                self.send_json({"ok": True, "container": {k: v for k, v in item.items() if k != "hf_token"}})
+                self.send_json({
+                    "ok": True,
+                    "container": {k: v for k, v in item.items() if k != "hf_token"},
+                    "removed_cache": removed_cache,
+                })
                 return
             if parsed.path == "/api/nvidia/repair":
                 job_id = start_background("repair nvidia docker", job_repair_nvidia)

@@ -9,6 +9,8 @@ import socket
 import subprocess
 import threading
 import time
+import urllib.parse
+import urllib.request
 import uuid
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
@@ -137,8 +139,13 @@ def validate_container(data, old_name=None):
     item = {
         "name": str(data.get("name", "")).strip(),
         "profile": str(data.get("profile", "nvidia")).strip() or "nvidia",
+        "model_format": str(data.get("model_format", "hf")).strip() or "hf",
         "image": str(data.get("image", "")).strip(),
         "model": str(data.get("model", DEFAULT_MODEL)).strip() or DEFAULT_MODEL,
+        "gguf_repo": str(data.get("gguf_repo", "")).strip(),
+        "gguf_file": str(data.get("gguf_file", "")).strip(),
+        "gguf_url": str(data.get("gguf_url", "")).strip(),
+        "tokenizer": str(data.get("tokenizer", "")).strip(),
         "port": int(data.get("port", 8000)),
         "hf_token": str(data.get("hf_token", "")),
         "extra_args": str(data.get("extra_args", "")),
@@ -149,6 +156,13 @@ def validate_container(data, old_name=None):
         raise ValueError("Container-Name: 2-64 Zeichen, erlaubt A-Z a-z 0-9 _ . -")
     if item["profile"] not in ("nvidia", "rocm", "xpu", "cpu"):
         raise ValueError("Unbekanntes Profil")
+    if item["model_format"] not in ("hf", "gguf"):
+        raise ValueError("Unbekanntes Modellformat")
+    if item["model_format"] == "gguf":
+        if not item["gguf_url"] and not (item["gguf_repo"] and item["gguf_file"]) and not item["gguf_file"].startswith("/"):
+            raise ValueError("GGUF braucht entweder Repo + konkrete .gguf Datei, eine GGUF-URL oder einen lokalen .gguf Pfad.")
+        if not item["tokenizer"]:
+            raise ValueError("GGUF braucht einen Tokenizer/Base-Model-Pfad, z.B. Qwen/Qwen3-32B.")
     if not item["image"]:
         item["image"] = default_image(item["profile"])
     if item["port"] < 1 or item["port"] > 65535:
@@ -229,7 +243,20 @@ def container_labels(name):
 
 
 def config_hash(item):
-    keys = ["profile", "image", "model", "port", "extra_args", "docker_extra_args", "autostart"]
+    keys = [
+        "profile",
+        "model_format",
+        "image",
+        "model",
+        "gguf_repo",
+        "gguf_file",
+        "gguf_url",
+        "tokenizer",
+        "port",
+        "extra_args",
+        "docker_extra_args",
+        "autostart",
+    ]
     payload = json.dumps({k: item.get(k) for k in keys}, sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
@@ -239,10 +266,115 @@ def docker_info_runtimes():
     return proc.stdout if proc.returncode == 0 else ""
 
 
-def build_run_args(item):
+def human_size(num):
+    units = ["B", "KB", "MB", "GB", "TB"]
+    value = float(num)
+    for unit in units:
+        if value < 1000 or unit == units[-1]:
+            return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} {unit}"
+        value /= 1000
+    return f"{value:.1f} TB"
+
+
+def hf_resolve_url(repo, filename):
+    clean_file = filename.lstrip("/")
+    quoted_file = urllib.parse.quote(clean_file, safe="/")
+    return f"https://huggingface.co/{repo}/resolve/main/{quoted_file}"
+
+
+def filename_from_url(url):
+    parsed = urllib.parse.urlparse(url)
+    name = Path(urllib.parse.unquote(parsed.path)).name
+    if not name:
+        raise ValueError("Aus der GGUF-URL konnte kein Dateiname erkannt werden.")
+    return name
+
+
+def download_file(job_id, url, dest, hf_token=""):
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists() and dest.stat().st_size > 0:
+        append_job(job_id, f"GGUF Datei bereits vorhanden: {dest}")
+        return
+
+    tmp = dest.with_name(dest.name + ".part")
+    request = urllib.request.Request(url)
+    if hf_token:
+        request.add_header("Authorization", f"Bearer {hf_token}")
+    append_job(job_id, f"GGUF Download: {url}")
+
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            total = int(response.headers.get("Content-Length") or 0)
+            downloaded = 0
+            last_report = 0.0
+            with tmp.open("wb") as handle:
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+                    downloaded += len(chunk)
+                    now = time.time()
+                    if now - last_report >= 1.0:
+                        last_report = now
+                        if total:
+                            percent = downloaded / total * 100
+                            append_job(job_id, f"GGUF Download: {percent:.1f}% {human_size(downloaded)} / {human_size(total)}")
+                        else:
+                            append_job(job_id, f"GGUF Download: {human_size(downloaded)}")
+        tmp.replace(dest)
+        append_job(job_id, f"GGUF Download fertig: {dest}")
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+
+
+def prepare_gguf_model(job_id, item):
+    gguf_file = item.get("gguf_file", "").strip()
+    gguf_url = item.get("gguf_url", "").strip()
+    gguf_repo = item.get("gguf_repo", "").strip()
+    cache_dir = HF_CACHE_BASE / item["name"]
+    local_mounts = []
+
+    if gguf_file.startswith("/"):
+        host_path = Path(gguf_file)
+        if not host_path.exists() or not host_path.is_file():
+            raise RuntimeError(f"Lokale GGUF-Datei nicht gefunden: {host_path}")
+        container_dir = "/models/gguf-local"
+        local_mounts.append(f"{host_path.parent}:{container_dir}:ro")
+        return f"{container_dir}/{host_path.name}", local_mounts
+
+    if gguf_url:
+        filename = filename_from_url(gguf_url)
+        dest = cache_dir / "gguf" / filename
+        download_file(job_id, gguf_url, dest, item.get("hf_token", ""))
+        return f"/root/.cache/huggingface/gguf/{filename}", local_mounts
+
+    if gguf_repo and gguf_file.lower().endswith(".gguf"):
+        filename = Path(gguf_file).name
+        dest = cache_dir / "gguf" / filename
+        download_file(job_id, hf_resolve_url(gguf_repo, gguf_file), dest, item.get("hf_token", ""))
+        return f"/root/.cache/huggingface/gguf/{filename}", local_mounts
+
+    if gguf_repo and gguf_file:
+        append_job(job_id, f"GGUF Hugging-Face Direktformat: {gguf_repo}:{gguf_file}")
+        return f"{gguf_repo}:{gguf_file}", local_mounts
+
+    raise RuntimeError("GGUF-Konfiguration unvollstaendig.")
+
+
+def prepare_model(job_id, item):
+    if item.get("model_format") == "gguf":
+        return prepare_gguf_model(job_id, item)
+    return item["model"], []
+
+
+def build_run_args(item, model_arg=None, extra_mounts=None):
     cache_dir = HF_CACHE_BASE / item["name"]
     cache_dir.mkdir(parents=True, exist_ok=True)
     restart_policy = "unless-stopped" if item.get("autostart") else "no"
+    model_arg = model_arg or item["model"]
+    extra_mounts = extra_mounts or []
     args = [
         "docker", "run", "-d",
         "--name", item["name"],
@@ -254,6 +386,10 @@ def build_run_args(item):
         "--label", "ai.vllm.webgui=1",
         "--label", f"ai.vllm.webgui.config={config_hash(item)}",
     ]
+    for mount in extra_mounts:
+        args += ["-v", mount]
+    if item.get("model_format") == "gguf":
+        args += ["--entrypoint", "/bin/bash"]
     profile = item.get("profile", "nvidia")
     if profile == "nvidia":
         if '"nvidia"' in docker_info_runtimes():
@@ -268,7 +404,25 @@ def build_run_args(item):
     if item.get("docker_extra_args"):
         args += shlex.split(item["docker_extra_args"])
     args.append(item["image"])
-    args.append(item["model"])
+    if item.get("model_format") == "gguf":
+        install_and_serve = (
+            "if command -v uv >/dev/null 2>&1; then "
+            "uv pip install --system vllm-gguf-plugin || uv pip install vllm-gguf-plugin; "
+            "else python3 -m pip install vllm-gguf-plugin; fi; "
+            "exec vllm serve \"$@\""
+        )
+        args += [
+            "-lc",
+            install_and_serve,
+            "vllm-gguf",
+            model_arg,
+            "--tokenizer",
+            item["tokenizer"],
+            "--served-model-name",
+            item["model"],
+        ]
+    else:
+        args.append(model_arg)
     if item.get("extra_args"):
         args += shlex.split(item["extra_args"])
     return args
@@ -331,7 +485,8 @@ def job_start_container(job_id, name):
             return
         stream_command(job_id, ["docker", "rm", "-f", name])
     stream_command(job_id, ["docker", "pull", item["image"]])
-    stream_command(job_id, build_run_args(item))
+    model_arg, extra_mounts = prepare_model(job_id, item)
+    stream_command(job_id, build_run_args(item, model_arg, extra_mounts))
     append_job(job_id, f"OpenAI Base URL: http://{local_ip()}:{item['port']}/v1")
 
 
@@ -397,17 +552,27 @@ def extract_progress_percent(text):
     values = []
     for match in PERCENT_RE.finditer(text):
         try:
-            values.append(float(match.group(1)))
+            values.append((match.start(), float(match.group(1))))
         except ValueError:
             pass
     for match in SIZE_RE.finditer(text):
         current = size_to_bytes(match.group(1), match.group(2))
         total = size_to_bytes(match.group(3), match.group(4))
         if total > 0:
-            values.append(min(100.0, max(0.0, current / total * 100.0)))
+            values.append((match.start(), min(100.0, max(0.0, current / total * 100.0))))
     if not values:
         return None
-    return int(max(values))
+    values.sort(key=lambda item: item[0])
+    return int(values[-1][1])
+
+
+def progress_from_text(text, allow_complete=False):
+    percent = extract_progress_percent(text)
+    if percent is None:
+        return None
+    if percent >= 100 and not allow_complete:
+        return None
+    return max(0, min(99 if not allow_complete else 100, percent))
 
 
 def latest_start_job_for(name):
@@ -429,7 +594,7 @@ def download_progress_for(item, status, api_ready):
     job = latest_start_job_for(name)
     if job:
         text = "\n".join(job.get("log", []))
-        percent = extract_progress_percent(text)
+        percent = progress_from_text(text)
         return {
             "percent": percent,
             "active": True,
@@ -438,19 +603,30 @@ def download_progress_for(item, status, api_ready):
 
     if status == "running":
         logs = tail_logs(name, lines=220)
-        percent = extract_progress_percent(logs)
         if "Application startup complete" in logs:
-            percent = 100
+            percent = 99
+            active = True
+            label = "Server startet, API pruefen"
         elif "Graph capturing finished" in logs:
-            percent = max(percent or 0, 95)
+            percent = 95
+            active = True
+            label = "Startet 95%"
         elif "Loading weights took" in logs or "Model loading took" in logs:
-            percent = max(percent or 0, 80)
+            percent = 80
+            active = True
+            label = "Laedt Modell 80%"
         elif "Loading model from scratch" in logs:
-            percent = max(percent or 0, 50)
+            percent = 50
+            active = True
+            label = "Laedt Modell 50%"
+        else:
+            percent = progress_from_text(logs)
+            active = True
+            label = "Download/Start laeuft" if percent is None else f"{percent}%"
         return {
             "percent": percent,
-            "active": percent is None or percent < 100,
-            "label": "Startet" if percent is None else f"{percent}%",
+            "active": active,
+            "label": label,
         }
 
     return {"percent": 0, "active": False, "label": "0%"}

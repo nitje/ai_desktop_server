@@ -67,13 +67,39 @@
           </select>
         </label>
 
+        <label>Modellformat
+          <select id="modelFormat">
+            <option value="hf">Hugging Face / Transformers</option>
+            <option value="gguf">GGUF</option>
+          </select>
+        </label>
+
         <label>Docker Image
           <input id="image" placeholder="vllm/vllm-openai:latest">
         </label>
 
-        <label>Hugging Face Modell
+        <label id="modelLabel">Hugging Face Modell
           <input id="model" value="Qwen/Qwen3-0.6B">
+          <small id="modelHint">Normale Hugging-Face-Repo-ID, z.B. Qwen/Qwen3-0.6B.</small>
         </label>
+
+        <div id="ggufFields" class="field-group hidden">
+          <label>GGUF Repo
+            <input id="ggufRepo" placeholder="z.B. unsloth/Qwen3-0.6B-GGUF">
+          </label>
+
+          <label>GGUF Datei oder Quantisierung
+            <input id="ggufFile" placeholder="z.B. Q4_K_M oder model-Q4_K_M.gguf oder /opt/models/model.gguf">
+          </label>
+
+          <label>GGUF Direkt-URL
+            <input id="ggufUrl" placeholder="https://huggingface.co/.../resolve/main/model.gguf">
+          </label>
+
+          <label>Tokenizer / Base Model
+            <input id="tokenizer" placeholder="z.B. Qwen/Qwen3-0.6B">
+          </label>
+        </div>
 
         <label>Host-Port
           <input id="port" type="number" min="1" max="65535" value="18000">

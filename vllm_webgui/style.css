@@ -122,6 +122,17 @@ label {
   color: var(--muted);
 }
 
+.field-group {
+  margin: 4px 0 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.hidden {
+  display: none;
+}
+
 input, select, button {
   min-height: 36px;
   border-radius: 6px;
@@ -279,7 +290,8 @@ small {
   overflow-wrap: anywhere;
 }
 
-.api-link {
+.api-link,
+.model-link {
   display: inline-block;
   margin-top: 4px;
   color: var(--accent);
@@ -287,7 +299,8 @@ small {
   text-decoration: none;
 }
 
-.api-link:hover {
+.api-link:hover,
+.model-link:hover {
   text-decoration: underline;
 }
 

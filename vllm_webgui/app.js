@@ -13,11 +13,13 @@ const modelFormat = document.getElementById("modelFormat");
 const ggufFields = document.getElementById("ggufFields");
 const modelLabel = document.getElementById("modelLabel");
 const modelHint = document.getElementById("modelHint");
+const portInput = document.getElementById("port");
 
 let state = null;
 let selectedName = null;
 let selectedJob = null;
 let currentLogTitle = "vllm-log";
+let portManuallyEdited = false;
 
 const defaults = {
   nvidia: "vllm/vllm-openai:latest",
@@ -65,6 +67,36 @@ function fileNameFromUrl(value) {
 
 function safeFilePart(value) {
   return String(value || "vllm-log").replace(/[^A-Za-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "") || "vllm-log";
+}
+
+function portUsedByCurrentEdit(port, exceptName = "") {
+  return !!exceptName && (state?.containers || []).some((c) => c.name === exceptName && Number(c.port) === Number(port));
+}
+
+function isPortUsed(port, exceptName = "") {
+  const numericPort = Number(port);
+  if (!Number.isInteger(numericPort) || numericPort < 1 || numericPort > 65535) return true;
+  const configured = (state?.containers || []).some((c) => c.name !== exceptName && Number(c.port) === numericPort);
+  if (configured) return true;
+  const hostUsed = (state?.ports_in_use || []).some((p) => Number(p) === numericPort);
+  return hostUsed && !portUsedByCurrentEdit(numericPort, exceptName);
+}
+
+function nextFreePort(start = 18000, exceptName = "") {
+  const first = Math.max(1, Math.min(65535, Number(start) || 18000));
+  for (let port = first; port <= 65535; port += 1) {
+    if (!isPortUsed(port, exceptName)) return port;
+  }
+  for (let port = 1; port < first; port += 1) {
+    if (!isPortUsed(port, exceptName)) return port;
+  }
+  return first;
+}
+
+function updateCreateFormPort() {
+  if (!state || selectedName || document.getElementById("oldName").value || portManuallyEdited) return;
+  const current = Number(portInput.value || 18000);
+  if (!current || isPortUsed(current)) portInput.value = nextFreePort(current || 18000);
 }
 
 function downloadCurrentLog() {
@@ -117,6 +149,7 @@ function initTheme() {
 }
 
 function fillForm(item = {}) {
+  const editing = !!item.name;
   document.getElementById("oldName").value = item.name || "";
   document.getElementById("name").value = item.name || "";
   document.getElementById("profile").value = item.profile || "nvidia";
@@ -128,12 +161,13 @@ function fillForm(item = {}) {
   document.getElementById("ggufUrl").value = item.gguf_url || "";
   document.getElementById("tokenizer").value = item.tokenizer || "";
   document.getElementById("hfConfigPath").value = item.hf_config_path || "";
-  document.getElementById("port").value = item.port || 18000;
+  portInput.value = editing ? item.port : nextFreePort(18000);
   document.getElementById("hfToken").value = "";
   document.getElementById("extraArgs").value = item.extra_args || "";
   document.getElementById("dockerExtraArgs").value = item.docker_extra_args || "";
   document.getElementById("autostart").checked = !!item.autostart;
   selectedName = item.name || null;
+  portManuallyEdited = false;
   toggleModelFormat();
 }
 
@@ -150,7 +184,7 @@ function formData() {
     gguf_url: document.getElementById("ggufUrl").value.trim(),
     tokenizer: document.getElementById("tokenizer").value.trim(),
     hf_config_path: document.getElementById("hfConfigPath").value.trim(),
-    port: Number(document.getElementById("port").value),
+    port: Number(portInput.value),
     hf_token: document.getElementById("hfToken").value,
     extra_args: document.getElementById("extraArgs").value,
     docker_extra_args: document.getElementById("dockerExtraArgs").value,
@@ -172,6 +206,7 @@ async function refresh() {
   statusLine.textContent = `Docker: ${state.docker ? "ok" : "fehlt"} | NVIDIA SMI: ${state.nvidia_smi ? "aktiv" : "fehlt"} | Web: http://${state.ip}:${state.web_port}/`;
   renderNvidiaStatus();
   renderRows();
+  updateCreateFormPort();
   await refreshJob();
   if (selectedName) await loadLogs(selectedName);
 }
@@ -188,7 +223,11 @@ function renderNvidiaStatus() {
 }
 
 function renderRows() {
-  const containers = state.containers || [];
+  const containers = [...(state.containers || [])].sort((a, b) => {
+    const portA = Number(a.port || 0);
+    const portB = Number(b.port || 0);
+    return portA - portB || String(a.name || "").localeCompare(String(b.name || ""));
+  });
   if (!containers.length) {
     rows.innerHTML = `<tr><td colspan="9">Noch keine Container konfiguriert.</td></tr>`;
     return;
@@ -201,10 +240,13 @@ function renderRows() {
     <tr>
       <td><strong>${escapeHtml(c.name)}</strong></td>
       <td>${badge(c.status, c.status)}${c.config_current ? "" : "<br><small>Config geaendert</small>"}</td>
-      <td>
-        ${badge(c.api_ready ? "API bereit" : "API nicht bereit", c.api_ready ? "running" : "missing")}
-        ${c.api_ready ? `<br><a class="api-link" href="${escapeHtml(c.api_models_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(c.api_models_url)}</a>` : ""}
-        ${c.diagnostic ? `<br><small class="diagnostic">${escapeHtml(c.diagnostic)}</small>` : ""}
+      <td class="api-status-cell">
+        <div class="api-status-block">
+          ${badge(c.api_ready ? "API bereit" : "API nicht bereit", c.api_ready ? "running" : "missing")}
+          <div class="api-detail-line">
+            ${c.api_ready ? `<a class="api-link" href="${escapeHtml(c.api_models_url)}" title="${escapeHtml(c.api_models_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(c.api_models_url)}</a>` : (c.diagnostic ? `<small class="diagnostic" title="${escapeHtml(c.diagnostic)}">${escapeHtml(c.diagnostic)}</small>` : `<span class="api-placeholder">&nbsp;</span>`)}
+          </div>
+        </div>
       </td>
       <td>${progressBar(c.download_progress)}</td>
       <td>${escapeHtml(c.profile)}</td>
@@ -218,6 +260,7 @@ function renderRows() {
           <button data-act="stop" data-name="${escapeHtml(c.name)}" class="secondary">Stop</button>
           <button data-act="unload" data-name="${escapeHtml(c.name)}" class="secondary">Unload VRAM</button>
           <button data-act="logs" data-name="${escapeHtml(c.name)}" class="secondary">Logs</button>
+          <button data-act="cache" data-name="${escapeHtml(c.name)}" class="danger">HF Cache</button>
           <button data-act="remove" data-name="${escapeHtml(c.name)}" class="danger">Deinstallieren</button>
         </div>
       </td>
@@ -272,8 +315,15 @@ async function loadLogs(name) {
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
-    const result = await api("/api/containers", {method: "POST", body: JSON.stringify(formData())});
-    document.getElementById("hfToken").value = "";
+    const data = formData();
+    if (state && isPortUsed(data.port, data.old_name)) {
+      data.port = nextFreePort(data.port || 18000, data.old_name);
+      portInput.value = data.port;
+    }
+    const result = await api("/api/containers", {method: "POST", body: JSON.stringify(data)});
+    fillForm();
+    selectedName = null;
+    selectedJob = null;
     await refresh();
     if (result.removed_cache && result.removed_cache.length) {
       selectedJob = null;
@@ -293,17 +343,28 @@ rows.addEventListener("click", async (event) => {
   const name = button.dataset.name;
   const action = button.dataset.act;
   const item = (state.containers || []).find((c) => c.name === name);
+  button.disabled = true;
   try {
-    if (action === "edit") fillForm(item);
-    if (action === "start") await startJob("start", name);
-    if (action === "stop") await startJob("stop", name);
-    if (action === "unload") await startJob("unload", name);
-    if (action === "logs") {
+    if (action === "edit") {
+      fillForm(item);
+      return;
+    } else if (action === "start") {
+      await startJob("start", name);
+    } else if (action === "stop") {
+      await startJob("stop", name);
+    } else if (action === "unload") {
+      await startJob("unload", name);
+    } else if (action === "logs") {
       selectedName = name;
       selectedJob = null;
       await loadLogs(name);
-    }
-    if (action === "remove") {
+    } else if (action === "cache") {
+      if (!confirm(`Hugging-Face-Modellcache fuer ${name} loeschen? Der Container wird dabei gestoppt.`)) return;
+      const data = await api(`/api/containers/${encodeURIComponent(name)}/clear-cache`, {method: "POST", body: "{}"});
+      selectedJob = data.job_id;
+      selectedName = name;
+      await refreshJob();
+    } else if (action === "remove") {
       const removeCache = confirm("Container deinstallieren? OK = inklusive HF-Cache, Abbrechen = nur Container/Config.");
       const data = await api(`/api/containers/${encodeURIComponent(name)}?remove_cache=${removeCache ? "1" : "0"}`, {method: "DELETE"});
       selectedJob = data.job_id;
@@ -313,6 +374,8 @@ rows.addEventListener("click", async (event) => {
     await refresh();
   } catch (error) {
     alert(error.message);
+  } finally {
+    button.disabled = false;
   }
 });
 
@@ -325,6 +388,16 @@ modelFormat.addEventListener("change", toggleModelFormat);
 
 refreshBtn.addEventListener("click", refresh);
 resetFormBtn.addEventListener("click", () => fillForm());
+portInput.addEventListener("input", () => {
+  portManuallyEdited = true;
+});
+portInput.addEventListener("blur", () => {
+  const oldName = document.getElementById("oldName").value;
+  const current = Number(portInput.value || 18000);
+  if (state && isPortUsed(current, oldName)) {
+    portInput.value = nextFreePort(current || 18000, oldName);
+  }
+});
 themeToggleBtn.addEventListener("click", () => {
   applyTheme(document.documentElement.dataset.theme === "dark" ? "day" : "dark");
 });

@@ -172,6 +172,13 @@ def cleanup_stale_hf_cache(item):
     return removed
 
 
+def ensure_inside_hf_cache(path):
+    base = HF_CACHE_BASE.resolve()
+    target = path.resolve()
+    if target == base or base not in target.parents:
+        raise RuntimeError(f"Ungueltiger Cache-Pfad: {target}")
+
+
 def delete_config(name):
     cfg = load_config()
     cfg["containers"] = [c for c in cfg.get("containers", []) if c.get("name") != name]
@@ -620,8 +627,38 @@ def job_remove_container(job_id, name, remove_cache=False):
     if remove_cache:
         cache_dir = HF_CACHE_BASE / name
         if cache_dir.exists() and cache_dir.is_dir():
+            ensure_inside_hf_cache(cache_dir)
             shutil.rmtree(cache_dir)
             append_job(job_id, f"Cache geloescht: {cache_dir}")
+
+
+def job_clear_model_cache(job_id, name):
+    item = find_config(name)
+    if not item:
+        raise RuntimeError("Container-Konfiguration nicht gefunden")
+    if container_running(name):
+        append_job(job_id, "Container laeuft. Stoppe Container, damit Modell/VRAM freigegeben wird.")
+        stream_command(job_id, ["docker", "stop", name])
+    cache_dir = HF_CACHE_BASE / name
+    if not cache_dir.exists():
+        append_job(job_id, f"Kein Cache vorhanden: {cache_dir}")
+        return
+    if not cache_dir.is_dir():
+        raise RuntimeError(f"Cache-Pfad ist kein Ordner: {cache_dir}")
+    ensure_inside_hf_cache(cache_dir)
+    removed = []
+    for child in cache_dir.iterdir():
+        if child.is_dir():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+        removed.append(child.name)
+    if removed:
+        append_job(job_id, f"Hugging-Face-Modellcache geloescht: {cache_dir}")
+        for name_part in removed:
+            append_job(job_id, f"geloescht: {name_part}")
+    else:
+        append_job(job_id, f"Cache war bereits leer: {cache_dir}")
 
 
 def job_unload_container(job_id, name):
@@ -771,6 +808,13 @@ def api_status_ready(item):
 
 
 def diagnose_logs(logs):
+    if "DeepseekV4 fp8_ds_mla layout only supports fp8 kv-cache" in logs:
+        return "DeepSeek-V4 braucht fuer dieses FP8/MLA-Layout einen FP8-KV-Cache. In Extra Args z.B. --kv-cache-dtype fp8 setzen und Container neu starten."
+    if "Can't get gguf config for qwen3_vl" in logs:
+        return "Qwen3-VL GGUF wird vom vLLM-GGUF-Plugin nicht unterstuetzt. Nutze dafuer das normale Hugging-Face/Safetensors-Modell oder eine andere Runtime."
+    gguf_config_error = re.search(r"Can't get gguf config for ([A-Za-z0-9_.-]+)", logs)
+    if gguf_config_error:
+        return f"GGUF nicht von vLLM-Plugin unterstuetzt: config fuer {gguf_config_error.group(1)} fehlt."
     if "Failed to map GGUF parameters" in logs and "linear_attn" in logs:
         return "GGUF nicht von vLLM-Plugin unterstuetzt: linear_attn/GDN-Gewichte koennen nicht gemappt werden."
     if "Unknown gguf model_type: qwen3_5" in logs:
@@ -826,6 +870,7 @@ def system_status():
         merged["hf_token_set"] = bool(item.get("hf_token"))
         merged.update(docker_status_for(item))
         containers.append(merged)
+    containers.sort(key=lambda c: (int(c.get("port", 0)), c.get("name", "")))
     with jobs_lock:
         job_values = list(jobs.values())[-20:]
     return {
@@ -910,6 +955,10 @@ class Handler(SimpleHTTPRequestHandler):
                     return
                 if action == "unload":
                     job_id = start_background(f"unload {name}", job_unload_container, name)
+                    self.send_json({"ok": True, "job_id": job_id})
+                    return
+                if action == "clear-cache":
+                    job_id = start_background(f"clear cache {name}", job_clear_model_cache, name)
                     self.send_json({"ok": True, "job_id": job_id})
                     return
             self.send_json({"error": "not found"}, 404)

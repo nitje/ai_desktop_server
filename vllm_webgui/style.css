@@ -110,7 +110,8 @@ main {
 table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 900px;
+  min-width: 1550px;
+  table-layout: fixed;
 }
 
 th, td {
@@ -125,6 +126,16 @@ th {
   color: var(--muted);
   font-weight: 600;
 }
+
+th:nth-child(1), td:nth-child(1) { width: 150px; }
+th:nth-child(2), td:nth-child(2) { width: 80px; }
+th:nth-child(3), td:nth-child(3) { width: 130px; }
+th:nth-child(4), td:nth-child(4) { width: 120px; }
+th:nth-child(5), td:nth-child(5) { width: 50px; }
+th:nth-child(6), td:nth-child(6) { width: 260px; }
+th:nth-child(7), td:nth-child(7) { width: 50px; }
+th:nth-child(8), td:nth-child(8) { width: 50px; }
+th:nth-child(9), td:nth-child(9) { width: 310px; }
 
 label {
   display: grid;
@@ -304,9 +315,12 @@ small {
 
 small.diagnostic {
   display: inline-block;
-  margin-top: 4px;
   color: #ffcf99;
-  max-width: 320px;
+  cursor: help;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 :root[data-theme="day"] small.diagnostic {
@@ -316,10 +330,32 @@ small.diagnostic {
 .api-link,
 .model-link {
   display: inline-block;
-  margin-top: 4px;
   color: var(--accent);
   overflow-wrap: anywhere;
   text-decoration: none;
+}
+
+.api-status-block {
+  display: grid;
+  gap: 4px;
+  min-height: 43px;
+}
+
+.api-detail-line {
+  min-height: 18px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.api-link {
+  max-width: 220px;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
 }
 
 .api-link:hover,

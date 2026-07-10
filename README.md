@@ -10,6 +10,14 @@ Video zum Setup in Visual Studio Code: https://youtu.be/IvAOa-rEq-c
 Im Persöhnlichen Ordner wird auch ein link zu ComfyUI erstellt wo ihr Model und output findet.
 <br><br><br>
 GGUF option added but it is in BETA
+<br>
+vLLM Zusatzargumente:
+
+--gpu-memory-utilization 0.88 --max-model-len 131072 --max-num-seqs 1 --max-num-batched-tokens 8192 --enable-auto-tool-choice --tool-call-parser openai
+
+--kv-cache-dtype fp8
+
+--kv-cache-dtype fp8_e4m3
 <br><br><br>
 <img src="https://interceptor.marconitschke.de/attachment.php?aid=824" alt="ai_desktop_server_rtx6000pro_workstation_comfyui">
 <br><br><br>

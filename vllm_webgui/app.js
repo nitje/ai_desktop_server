@@ -172,6 +172,11 @@ function hfLink(repo) {
   return `<br><small>HF: <a class="model-link" href="${escapeHtml(href)}" title="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">Link</a></small>`;
 }
 
+function modelSizeLine(container) {
+  const label = container.model_size_label || "";
+  return `<br><small>Size: ${label ? escapeHtml(label) : "-"}</small>`;
+}
+
 function safeFilePart(value) {
   return String(value || "vllm-log").replace(/[^A-Za-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "") || "vllm-log";
 }
@@ -802,8 +807,8 @@ function renderRows() {
   }
   rows.innerHTML = visibleContainers.map((c) => {
     const modelCell = c.model_format === "gguf"
-      ? `${escapeHtml(c.model)}<br><small>GGUF: ${renderGgufSource(c)}</small>`
-      : `${escapeHtml(c.model)}${hfLink(c.model)}`;
+      ? `${escapeHtml(c.model)}<br><small>GGUF: ${renderGgufSource(c)}</small>${modelSizeLine(c)}`
+      : `${escapeHtml(c.model)}${hfLink(c.model)}${modelSizeLine(c)}`;
     return `
     <tr>
       <td><strong>${escapeHtml(c.name)}</strong></td>

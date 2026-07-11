@@ -579,6 +579,75 @@ def human_size(num):
     return f"{value:.1f} TB"
 
 
+def path_size_bytes(path):
+    path = Path(path)
+    if not path.exists():
+        return 0
+    if path.is_file():
+        return path.stat().st_size
+    total = 0
+    stack = [path]
+    while stack:
+        current = stack.pop()
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_symlink():
+                            continue
+                        if entry.is_dir(follow_symlinks=False):
+                            stack.append(Path(entry.path))
+                        elif entry.is_file(follow_symlinks=False):
+                            total += entry.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    return total
+
+
+def model_cache_paths(item):
+    cache_dir = HF_CACHE_BASE / item["name"]
+    if item.get("model_format") == "gguf":
+        gguf_file = item.get("gguf_file", "").strip()
+        gguf_url = item.get("gguf_url", "").strip()
+        gguf_repo = item.get("gguf_repo", "").strip()
+        if gguf_file.startswith("/"):
+            return [Path(gguf_file)]
+        if gguf_url:
+            return [cache_dir / "gguf" / filename_from_url(gguf_url)]
+        if gguf_repo and gguf_file.lower().endswith(".gguf"):
+            return [cache_dir / "gguf" / Path(gguf_file).name]
+        if gguf_repo:
+            return [
+                cache_dir / "hub" / hf_repo_cache_name(gguf_repo),
+                cache_dir / hf_repo_cache_name(gguf_repo),
+            ]
+        return [cache_dir / "gguf"]
+    repo = item.get("model", "").strip()
+    if is_hf_repo_id(repo):
+        return [
+            cache_dir / "hub" / hf_repo_cache_name(repo),
+            cache_dir / hf_repo_cache_name(repo),
+        ]
+    return []
+
+
+def model_size_for(item):
+    total = 0
+    seen = set()
+    for path in model_cache_paths(item):
+        try:
+            resolved = path.resolve()
+        except OSError:
+            resolved = path
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        total += path_size_bytes(path)
+    return total
+
+
 def hf_resolve_url(repo, filename):
     clean_file = filename.lstrip("/")
     quoted_file = urllib.parse.quote(clean_file, safe="/")
@@ -1200,6 +1269,7 @@ def docker_status_for(item):
     progress = download_progress_for(item, status, api_ready)
     diagnostic = diagnose_logs(tail_logs(name, lines=260)) if status != "missing" and not api_ready else ""
     startup_status = startup_status_for(name, status, api_ready)
+    model_size = model_size_for(item)
     return {
         "status": status,
         "api_status": "ready" if api_ready else "not_ready",
@@ -1209,6 +1279,8 @@ def docker_status_for(item):
         "diagnostic": diagnostic,
         "startup_status": startup_status,
         "download_progress": progress,
+        "model_size_bytes": model_size,
+        "model_size_label": human_size(model_size) if model_size else "",
         "config_current": status != "missing" and container_runtime_current(name, item),
         "url": api_url,
     }

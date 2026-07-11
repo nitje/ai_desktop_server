@@ -16,9 +16,11 @@ GGUF option hinzugefügt ist aber in BETA
 vLLM Zusatzargumente:
 <br># OpenAI/GPT-OSS-120B #
 <br>
+
 --gpu-memory-utilization 0.88 --max-model-len 131072 --max-num-seqs 1 --max-num-batched-tokens 8192 --enable-auto-tool-choice --tool-call-parser openai
 <br># Qwen/Qwen3-Coder-Next-FP8 #
 <br>
+
 --gpu-memory-utilization 0.88 --max-model-len 131072 --max-num-seqs 1 --max-num-batched-tokens 8192 --enable-auto-tool-choice --tool-call-parser qwen3_coder
 <br># optional:
 

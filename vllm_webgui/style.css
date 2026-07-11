@@ -358,6 +358,17 @@ small.diagnostic {
   white-space: nowrap;
 }
 
+.startup-line {
+  color: var(--muted);
+  cursor: help;
+  font-size: 12px;
+  max-width: 150px;
+  min-height: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .api-link:hover,
 .model-link:hover {
   text-decoration: underline;

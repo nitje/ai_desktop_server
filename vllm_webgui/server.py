@@ -22,6 +22,7 @@ BASE_DIR = Path(os.environ.get("VLLM_WEBGUI_BASE_DIR", f"/opt/{APP_NAME}/vllm_we
 CONFIG_FILE = Path(os.environ.get("VLLM_WEBGUI_CONFIG", str(BASE_DIR / "containers.json")))
 HF_CACHE_BASE = Path(os.environ.get("VLLM_WEBGUI_HF_CACHE_DIR", str(BASE_DIR / "huggingface-cache")))
 STATIC_DIR = Path(os.environ.get("VLLM_WEBGUI_STATIC_DIR", str(BASE_DIR / "static")))
+STARTUP_STATS_FILE = Path(os.environ.get("VLLM_WEBGUI_STARTUP_STATS", str(BASE_DIR / "startup_stats.json")))
 HOST = os.environ.get("VLLM_WEBGUI_HOST", "0.0.0.0")
 PORT = int(os.environ.get("VLLM_WEBGUI_PORT", "18000"))
 
@@ -34,6 +35,7 @@ SIZE_RE = re.compile(r"([0-9]+(?:\.[0-9]+)?)\s*([KMGT]?i?B)\s*/\s*([0-9]+(?:\.[0
 jobs = {}
 jobs_lock = threading.Lock()
 config_lock = threading.Lock()
+startup_lock = threading.Lock()
 
 
 def run(cmd, check=False, timeout=None):
@@ -77,6 +79,118 @@ def save_config(cfg):
         BASE_DIR.mkdir(parents=True, exist_ok=True)
         CONFIG_FILE.write_text(json.dumps(cfg, indent=2, sort_keys=True), encoding="utf-8")
         os.chmod(CONFIG_FILE, 0o600)
+
+
+def load_startup_stats_unlocked():
+    if not STARTUP_STATS_FILE.exists():
+        return {"containers": {}}
+    try:
+        return json.loads(STARTUP_STATS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {"containers": {}}
+
+
+def save_startup_stats_unlocked(stats):
+    BASE_DIR.mkdir(parents=True, exist_ok=True)
+    STARTUP_STATS_FILE.write_text(json.dumps(stats, indent=2, sort_keys=True), encoding="utf-8")
+    os.chmod(STARTUP_STATS_FILE, 0o600)
+
+
+def startup_entry_unlocked(stats, name):
+    containers = stats.setdefault("containers", {})
+    return containers.setdefault(name, {"cold": [], "restart": []})
+
+
+def record_start_attempt(name, kind):
+    with startup_lock:
+        stats = load_startup_stats_unlocked()
+        entry = startup_entry_unlocked(stats, name)
+        entry["active"] = {"started_at": time.time(), "kind": kind}
+        save_startup_stats_unlocked(stats)
+
+
+def clear_start_attempt(name):
+    with startup_lock:
+        stats = load_startup_stats_unlocked()
+        entry = stats.get("containers", {}).get(name)
+        if entry and entry.pop("active", None):
+            save_startup_stats_unlocked(stats)
+
+
+def record_api_ready(name):
+    with startup_lock:
+        stats = load_startup_stats_unlocked()
+        entry = stats.get("containers", {}).get(name)
+        if not entry or not entry.get("active"):
+            return
+        active = entry.pop("active")
+        duration = max(0, int(time.time() - float(active.get("started_at", time.time()))))
+        if duration < 2:
+            save_startup_stats_unlocked(stats)
+            return
+        kind = active.get("kind") if active.get("kind") in ("cold", "restart") else "restart"
+        samples = entry.setdefault(kind, [])
+        samples.append({"duration": duration, "ts": int(time.time())})
+        entry[kind] = samples[-8:]
+        entry["last"] = {"duration": duration, "kind": kind, "ts": int(time.time())}
+        save_startup_stats_unlocked(stats)
+
+
+def average_duration(samples):
+    durations = [int(sample.get("duration", 0)) for sample in samples if int(sample.get("duration", 0)) > 0]
+    if not durations:
+        return None
+    return int(sum(durations[-5:]) / len(durations[-5:]))
+
+
+def format_duration(seconds):
+    if seconds is None:
+        return ""
+    seconds = max(0, int(seconds))
+    minutes, secs = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m"
+    if minutes:
+        return f"{minutes}m {secs:02d}s"
+    return f"{secs}s"
+
+
+def startup_status_for(name, status, api_ready):
+    if api_ready:
+        record_api_ready(name)
+    elif status != "running" and not latest_start_job_for(name):
+        clear_start_attempt(name)
+
+    with startup_lock:
+        stats = load_startup_stats_unlocked()
+        entry = stats.get("containers", {}).get(name, {})
+        active = entry.get("active")
+        last = entry.get("last")
+
+        if active and not api_ready:
+            kind = active.get("kind") if active.get("kind") in ("cold", "restart") else "restart"
+            elapsed = max(0, int(time.time() - float(active.get("started_at", time.time()))))
+            estimate = average_duration(entry.get(kind, []))
+            if estimate:
+                text = f"Startzeit: {format_duration(elapsed)} / ca. {format_duration(estimate)}"
+                title = "Schaetzung aus bisherigen normalen Neustarts." if kind == "restart" else "Schaetzung aus bisherigen Erststarts/Neuaufbauten mit Pull/Download."
+            else:
+                text = f"Startzeit: Berechnung ({format_duration(elapsed)})"
+                title = "Noch keine verlaessliche Startzeit. Erststart, Docker-Pull und Modelldownload koennen deutlich laenger dauern."
+            return {"text": text, "title": title, "state": "measuring", "kind": kind}
+
+        restart_estimate = average_duration(entry.get("restart", []))
+        cold_estimate = average_duration(entry.get("cold", []))
+        if restart_estimate:
+            title = "Ungefaehre API-Startzeit nach einem normalen Neustart. Erststart/Pull/Download dauert laenger."
+            return {"text": f"Startzeit ca. {format_duration(restart_estimate)}", "title": title, "state": "estimated", "kind": "restart"}
+        if cold_estimate:
+            title = "Bisher nur Erststart/Neuaufbau gemessen. Normale Neustarts werden spaeter genauer."
+            return {"text": f"Startzeit ca. {format_duration(cold_estimate)}", "title": title, "state": "estimated", "kind": "cold"}
+        if last:
+            return {"text": f"Letzter Start {format_duration(last.get('duration'))}", "title": "Noch zu wenig Daten fuer eine stabile Schaetzung.", "state": "last", "kind": last.get("kind", "")}
+    return {"text": "Startzeit: Berechnung", "title": "Noch keine erfolgreiche Startzeit gemessen.", "state": "unknown", "kind": ""}
 
 
 def list_configured():
@@ -614,8 +728,13 @@ def job_start_container(job_id, name):
     if not item:
         raise RuntimeError("Container-Konfiguration nicht gefunden")
     ensure_port_free(item["port"], name)
-    if container_exists(name):
-        if container_runtime_current(name, item):
+    exists_before = container_exists(name)
+    runtime_current = exists_before and container_runtime_current(name, item)
+    already_ready = runtime_current and container_running(name) and api_status_ready(item)
+    if not already_ready:
+        record_start_attempt(name, "restart" if runtime_current else "cold")
+    if exists_before:
+        if runtime_current:
             stream_command(job_id, ["docker", "update", "--restart", "unless-stopped" if item.get("autostart") else "no", name])
             if not container_running(name):
                 stream_command(job_id, ["docker", "start", name])
@@ -633,6 +752,7 @@ def job_start_container(job_id, name):
 def job_stop_container(job_id, name):
     if container_exists(name):
         stream_command(job_id, ["docker", "stop", name])
+        clear_start_attempt(name)
         append_job(job_id, "Container gestoppt. Modell ist aus VRAM entladen.")
     else:
         append_job(job_id, "Container existiert nicht.")
@@ -641,6 +761,7 @@ def job_stop_container(job_id, name):
 def job_remove_container(job_id, name, remove_cache=False):
     if container_exists(name):
         stream_command(job_id, ["docker", "rm", "-f", name])
+    clear_start_attempt(name)
     delete_config(name)
     if remove_cache:
         cache_dir = HF_CACHE_BASE / name
@@ -834,7 +955,7 @@ def diagnose_logs(logs):
     if gguf_config_error:
         return f"GGUF nicht von vLLM-Plugin unterstuetzt: config fuer {gguf_config_error.group(1)} fehlt."
     if "Failed to map GGUF parameters" in logs and "linear_attn" in logs:
-        return "GGUF nicht von vLLM-Plugin unterstuetzt: linear_attn/GDN-Gewichte koennen nicht gemappt werden."
+        return "GGUF nicht von vLLM-Plugin unterstuetzt: linear_attn/GDN-Gewichte koennen nicht gemappt werden. Der fast-path-Hinweis ist nur eine Warnung."
     if "Unknown gguf model_type: qwen3_5" in logs:
         return "GGUF-Plugin kennt qwen3_5 nicht. Container neu erstellen, damit der WebGUI-Patch greift."
     unknown_type = re.search(r"Unknown gguf model_type: ([A-Za-z0-9_.-]+)", logs)
@@ -857,6 +978,7 @@ def docker_status_for(item):
     api_url = f"http://{local_ip()}:{item['port']}/v1"
     progress = download_progress_for(item, status, api_ready)
     diagnostic = diagnose_logs(tail_logs(name, lines=260)) if status != "missing" and not api_ready else ""
+    startup_status = startup_status_for(name, status, api_ready)
     return {
         "status": status,
         "api_status": "ready" if api_ready else "not_ready",
@@ -864,6 +986,7 @@ def docker_status_for(item):
         "api_url": api_url if api_ready else "",
         "api_models_url": f"{api_url}/models" if api_ready else "",
         "diagnostic": diagnostic,
+        "startup_status": startup_status,
         "download_progress": progress,
         "config_current": status != "missing" and container_runtime_current(name, item),
         "url": api_url,

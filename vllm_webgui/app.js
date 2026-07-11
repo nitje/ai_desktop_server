@@ -178,6 +178,11 @@ function badge(status, kind = "") {
   return `<span class="badge ${escapeHtml(kind)}">${escapeHtml(status)}</span>`;
 }
 
+function startupLine(status = {}) {
+  if (!status.text) return "";
+  return `<div class="startup-line" title="${escapeHtml(status.title || status.text)}">${escapeHtml(status.text)}</div>`;
+}
+
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
   localStorage.setItem("vllm-theme", theme);
@@ -288,7 +293,7 @@ function renderRows() {
           </div>
         </div>
       </td>
-      <td>${progressBar(c.download_progress)}</td>
+      <td>${progressBar(c.download_progress, c.startup_status)}</td>
       <td>${escapeHtml(c.profile)}</td>
       <td>${modelCell}</td>
       <td>${escapeHtml(c.port)}</td>
@@ -308,7 +313,7 @@ function renderRows() {
   `}).join("");
 }
 
-function progressBar(progress = {}) {
+function progressBar(progress = {}, startupStatus = {}) {
   const percent = Number.isFinite(progress.percent) ? Math.max(0, Math.min(100, progress.percent)) : null;
   const active = !!progress.active;
   const label = progress.label || (percent === null ? "wartet" : `${percent}%`);
@@ -319,6 +324,7 @@ function progressBar(progress = {}) {
         <div class="progress-fill ${active ? "active" : ""}" ${style}></div>
       </div>
       <small>${escapeHtml(label)}</small>
+      ${startupLine(startupStatus)}
     </div>
   `;
 }

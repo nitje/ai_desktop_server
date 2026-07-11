@@ -1,5 +1,5 @@
 # ai_desktop_server
-ai_desktop_server with vllm-webgui(docker) | LM Studio | VS Code | ComfyUI ... RTX6000 optimized
+ai_desktop_server with vllm-webgui(docker) | LM Studio | VS Code | ComfyUI ... RTX 6000 Pro Workstation optimized
 
 
 

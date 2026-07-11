@@ -37,17 +37,26 @@ vLLM Zusatzargumente:
 
 --kv-cache-dtype fp8_e4m3
 <br><br><br>
+# Bilder:
+<br>
+ComfyUi:
 <img src="https://interceptor.marconitschke.de/attachment.php?aid=824" alt="ai_desktop_server_rtx6000pro_workstation_comfyui">
 <br><br><br>
+GGUF integration:
 <img src="https://interceptor.marconitschke.de/attachment.php?aid=827" alt="ai_desktop_server_rtx6000pro_workstation_gguf">
 <br><br>
+GGUF integration mit Link:
 <img src="https://interceptor.marconitschke.de/attachment.php?aid=828" alt="ai_desktop_server_rtx6000pro_workstation_gguf_link">
 <br><br>
+Kodierung mit VS-Code-1:
 <img src="https://interceptor.marconitschke.de/attachment.php?aid=829" alt="ai_desktop_server_rtx6000pro_workstation_120b_tetris">
 <br><br>
+Kodierung mit VS-Code-2:
 <img src="https://interceptor.marconitschke.de/attachment.php?aid=830" alt="ai_desktop_server_rtx6000pro_workstation_qwen3_coder_next_tetris">
 <br><br>
+Startzeit:
 <img src="https://interceptor.marconitschke.de/attachment.php?aid=831" alt="ai_desktop_server_rtx6000pro_workstation_timer_indicator">
 <br><br>
+Sytemauslastung:
 <img src="https://interceptor.marconitschke.de/attachment.php?aid=832" alt="ai_desktop_server_rtx6000pro_workstation_display_system_load">
 <br>

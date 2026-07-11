@@ -126,11 +126,13 @@ def normalize_ui_settings(data):
     selected_disks = data.get("selected_disks")
     if selected_disks is not None:
         selected_disks = [str(item) for item in selected_disks] if isinstance(selected_disks, list) else None
-    sort_fields = {"port", "name", "startup", "running", "api_ready"}
+    sort_fields = {"port", "name", "startup", "status", "api_ready"}
     sort_directions = {"asc", "desc"}
     size_units = {"GB", "TB"}
     temp_units = {"C", "F"}
     container_sort = view.get("containerSort")
+    if container_sort == "running":
+        container_sort = "status"
     container_sort_direction = view.get("containerSortDirection")
     old_system_size_unit = view.get("systemSizeUnit")
     ram_size_unit = view.get("ramSizeUnit", old_system_size_unit)

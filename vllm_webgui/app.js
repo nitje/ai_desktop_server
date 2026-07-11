@@ -294,11 +294,12 @@ function normalizeUiSettings(settings = {}) {
   const poll = settings.poll || {};
   const cards = settings.cards || {};
   const view = settings.view || {};
-  const sortFields = new Set(["port", "name", "startup", "running", "api_ready"]);
+  const sortFields = new Set(["port", "name", "startup", "status", "api_ready"]);
   const sortDirections = new Set(["asc", "desc"]);
   const sizeUnits = new Set(["GB", "TB"]);
   const tempUnits = new Set(["C", "F"]);
-  const containerSort = sortFields.has(view.containerSort) ? view.containerSort : defaultViewSettings.containerSort;
+  const rawContainerSort = view.containerSort === "running" ? "status" : view.containerSort;
+  const containerSort = sortFields.has(rawContainerSort) ? rawContainerSort : defaultViewSettings.containerSort;
   const containerSortDirection = sortDirections.has(view.containerSortDirection) ? view.containerSortDirection : defaultViewSettings.containerSortDirection;
   const legacySizeUnit = sizeUnits.has(view.systemSizeUnit) ? view.systemSizeUnit : null;
   const ramSizeUnit = sizeUnits.has(view.ramSizeUnit) ? view.ramSizeUnit : (legacySizeUnit || defaultViewSettings.ramSizeUnit);
@@ -394,7 +395,7 @@ function readViewSettings() {
 }
 
 function saveViewSettings(settings) {
-  const sortFields = new Set(["port", "name", "startup", "running", "api_ready"]);
+  const sortFields = new Set(["port", "name", "startup", "status", "api_ready"]);
   const sortDirections = new Set(["asc", "desc"]);
   const sizeUnits = new Set(["GB", "TB"]);
   const tempUnits = new Set(["C", "F"]);
@@ -745,7 +746,10 @@ function containerSortValue(container, field) {
     const value = Number(container.startup_status?.sort_seconds);
     return Number.isFinite(value) && value > 0 ? value : null;
   }
-  if (field === "running") return container.status === "running" ? 1 : 0;
+  if (field === "status") {
+    const ranks = {missing: 0, stopped: 1, running: 2};
+    return Object.prototype.hasOwnProperty.call(ranks, container.status) ? ranks[container.status] : 1;
+  }
   if (field === "api_ready") return container.api_ready ? 1 : 0;
   return Number(container.port || 0);
 }

@@ -65,6 +65,45 @@ function fileNameFromUrl(value) {
   }
 }
 
+function huggingFaceRepoFromUrl(value) {
+  try {
+    const url = new URL(value);
+    if (url.hostname !== "huggingface.co") return "";
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts.length < 2) return "";
+    return `${parts[0]}/${parts[1]}`;
+  } catch {
+    return "";
+  }
+}
+
+function huggingFaceRepoUrl(repo) {
+  const clean = String(repo || "").trim().split(":", 1)[0];
+  if (!clean || clean.startsWith("/") || clean.includes("://") || !clean.includes("/")) return "";
+  return `https://huggingface.co/${clean}/tree/main`;
+}
+
+function quantLabelFromGguf(filename, repo) {
+  const stem = String(filename || "").replace(/\.gguf$/i, "");
+  const repoName = String(repo || "").split("/").pop() || "";
+  const baseName = repoName.replace(/-GGUF$/i, "");
+  if (baseName && stem.startsWith(`${baseName}-`)) return stem.slice(baseName.length + 1);
+  return stem || filename || "";
+}
+
+function modelLink(repo, label, max = 58) {
+  const href = huggingFaceRepoUrl(repo);
+  const text = shortText(label || repo || "unvollstaendig", max);
+  if (!href) return escapeHtml(text);
+  return `<a class="model-link" href="${escapeHtml(href)}" title="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`;
+}
+
+function hfLink(repo) {
+  const href = huggingFaceRepoUrl(repo);
+  if (!href) return "";
+  return `<br><small>HF: <a class="model-link" href="${escapeHtml(href)}" title="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">Link</a></small>`;
+}
+
 function safeFilePart(value) {
   return String(value || "vllm-log").replace(/[^A-Za-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "") || "vllm-log";
 }
@@ -126,12 +165,13 @@ function clearVisibleLog() {
 
 function renderGgufSource(c) {
   if (c.gguf_url) {
-    const label = shortText(fileNameFromUrl(c.gguf_url), 44);
-    const href = escapeHtml(c.gguf_url);
-    return `<a class="model-link" href="${href}" title="${href}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`;
+    const repo = c.gguf_repo || huggingFaceRepoFromUrl(c.gguf_url);
+    const filename = fileNameFromUrl(c.gguf_url);
+    const label = repo ? `${repo}:${quantLabelFromGguf(filename, repo)}` : filename;
+    return modelLink(repo, label, 58);
   }
   const source = c.gguf_repo && c.gguf_file ? `${c.gguf_repo}:${c.gguf_file}` : c.gguf_file;
-  return escapeHtml(shortText(source || "unvollstaendig", 58));
+  return modelLink(c.gguf_repo, source, 58);
 }
 
 function badge(status, kind = "") {
@@ -235,7 +275,7 @@ function renderRows() {
   rows.innerHTML = containers.map((c) => {
     const modelCell = c.model_format === "gguf"
       ? `${escapeHtml(c.model)}<br><small>GGUF: ${renderGgufSource(c)}</small>`
-      : escapeHtml(c.model);
+      : `${escapeHtml(c.model)}${hfLink(c.model)}`;
     return `
     <tr>
       <td><strong>${escapeHtml(c.name)}</strong></td>

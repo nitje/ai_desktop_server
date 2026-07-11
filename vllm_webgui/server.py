@@ -306,6 +306,23 @@ def container_labels(name):
         return {}
 
 
+def container_hf_token(name):
+    proc = run(["docker", "inspect", "-f", "{{range .Config.Env}}{{println .}}{{end}}", name])
+    if proc.returncode != 0:
+        return ""
+    for line in proc.stdout.splitlines():
+        if line.startswith("HF_TOKEN="):
+            return line.split("=", 1)[1]
+    return ""
+
+
+def container_runtime_current(name, item):
+    return (
+        container_labels(name).get("ai.vllm.webgui.config") == config_hash(item)
+        and container_hf_token(name) == item.get("hf_token", "")
+    )
+
+
 def config_hash(item):
     keys = [
         "profile",
@@ -598,13 +615,14 @@ def job_start_container(job_id, name):
         raise RuntimeError("Container-Konfiguration nicht gefunden")
     ensure_port_free(item["port"], name)
     if container_exists(name):
-        labels = container_labels(name)
-        if labels.get("ai.vllm.webgui.config") == config_hash(item):
+        if container_runtime_current(name, item):
             stream_command(job_id, ["docker", "update", "--restart", "unless-stopped" if item.get("autostart") else "no", name])
             if not container_running(name):
                 stream_command(job_id, ["docker", "start", name])
             append_job(job_id, "Container existierte bereits und wurde gestartet.")
             return
+        if container_hf_token(name) != item.get("hf_token", ""):
+            append_job(job_id, "HF_TOKEN hat sich geaendert oder wurde wiederhergestellt. Container wird neu erstellt.")
         stream_command(job_id, ["docker", "rm", "-f", name])
     stream_command(job_id, ["docker", "pull", item["image"]])
     model_arg, extra_mounts = prepare_model(job_id, item)
@@ -847,7 +865,7 @@ def docker_status_for(item):
         "api_models_url": f"{api_url}/models" if api_ready else "",
         "diagnostic": diagnostic,
         "download_progress": progress,
-        "config_current": labels.get("ai.vllm.webgui.config") == config_hash(item),
+        "config_current": status != "missing" and container_runtime_current(name, item),
         "url": api_url,
     }
 
@@ -927,7 +945,10 @@ class Handler(SimpleHTTPRequestHandler):
             if parsed.path == "/api/containers":
                 data = self.read_json()
                 old_name = data.get("old_name") or data.get("name")
+                old_item = find_config(old_name) if old_name else None
                 item = validate_container(data, old_name=old_name)
+                if not item.get("hf_token") and old_item and old_item.get("hf_token"):
+                    item["hf_token"] = old_item["hf_token"]
                 rename_cache_dir(old_name, item["name"])
                 removed_cache = cleanup_stale_hf_cache(item)
                 upsert_config(item)

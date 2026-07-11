@@ -15,6 +15,12 @@ Im Persöhnlichen Ordner wird auch ein link zu ComfyUI erstellt wo ihr Model und
 GGUF option hinzugefügt ist aber in BETA
 <br>
 <br>
+<br>
+# Aktualisieren:
+Alle Dateien überschreiben und auswahl von "Reparieren/aktualisieren"
+<br>
+<br>
+<br>
 vLLM Zusatzargumente:
 <br>
 # OpenAI/GPT-OSS-120B #

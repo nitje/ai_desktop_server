@@ -14,7 +14,7 @@ Im Persöhnlichen Ordner wird auch ein link zu ComfyUI erstellt wo ihr Model und
 <br><br><br>
 GGUF option hinzugefügt ist aber in BETA
 <br>
-# Aktualisieren:
+# Update/Aktualisieren:
 Alle Dateien überschreiben und beim ausführen die auswahl "Reparieren/aktualisieren" nutzen.
 <br>
 <br>

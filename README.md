@@ -1,5 +1,5 @@
 # ai_desktop_server
-scripts
+ai_dekstop_server with vllm-webgui(docker) | LM Studio | VS Code ... RTX6000 optimized
 
 
 

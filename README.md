@@ -1,9 +1,9 @@
 # ai_desktop_server
 ai_desktop_server with vllm-webgui(docker) | LM Studio | VS Code | ComfyUI ... RTX 6000 Pro Workstation optimized
-<br>
+<br><br><br>
 Vorraussetzung:<br>
 Debian 13.5 mit Desktop gnome ist Vorinstalliert
-<br>
+<br><br>
 Video zum Setup: https://youtu.be/MUCXDlkUb0w
 <br>
 Video zum Setup in Visual Studio Code: https://youtu.be/IvAOa-rEq-c

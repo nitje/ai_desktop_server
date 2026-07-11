@@ -1,15 +1,16 @@
 # ai_desktop_server
 ai_desktop_server with vllm-webgui(docker) | LM Studio | VS Code | ComfyUI ... RTX 6000 Pro Workstation optimized
-
-
-
+<br>
+Vorraussetzung:<br>
+Debian 13.5 mit Desktop gnome ist Vorinstalliert
+<br>
 Video zum Setup: https://youtu.be/MUCXDlkUb0w
 <br>
 Video zum Setup in Visual Studio Code: https://youtu.be/IvAOa-rEq-c
 <br><br><br>
 Im Persöhnlichen Ordner wird auch ein link zu ComfyUI erstellt wo ihr Model und output findet.
 <br><br><br>
-GGUF option added but it is in BETA
+GGUF option hinzugefügt ist aber in BETA
 <br>
 <br>
 vLLM Zusatzargumente:

@@ -7,6 +7,8 @@ Debian 13.5 mit Desktop gnome ist Vorinstalliert
 Video zum Setup: https://youtu.be/MUCXDlkUb0w
 <br>
 Video zum Setup in Visual Studio Code: https://youtu.be/IvAOa-rEq-c
+<br>
+Video zu Updates: https://youtu.be/eXfz6yDgprE
 <br><br><br>
 Im Persöhnlichen Ordner wird auch ein link zu ComfyUI erstellt wo ihr Model und output findet.
 <br><br><br>

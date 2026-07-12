@@ -748,7 +748,8 @@ function toggleModelFormat() {
 async function refreshOverview() {
   const data = await api("/api/overview");
   state = {...(state || {}), ...data};
-  statusLine.textContent = `Docker: ${state.docker ? "ok" : "fehlt"} | NVIDIA SMI: ${state.nvidia_smi ? "aktiv" : "fehlt"} | Web: http://${state.ip}:${state.web_port}/`;
+  const version = escapeHtml(state.runner_version || "local");
+  statusLine.innerHTML = `Version 0.51 - Hotfix: ${version} | &copy; 2026 <a href="https://interceptor.marconitschke.de/thread-157.html" target="_blank" rel="noopener noreferrer">Marco Nitschke</a> | <a href="https://hub.docker.com/u/nitje" target="_blank" rel="noopener noreferrer">DockerHub</a> | <a href="https://github.com/nitje" target="_blank" rel="noopener noreferrer">GitHub</a> | <a href="https://github.com/vllm-project/vllm" target="_blank" rel="noopener noreferrer">vLLM Projekt</a>`;
   renderNvidiaStatus();
 }
 

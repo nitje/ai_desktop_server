@@ -65,6 +65,20 @@ p {
   color: var(--muted);
 }
 
+.app-meta {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.app-meta a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.app-meta a:hover {
+  text-decoration: underline;
+}
+
 main {
   padding: 20px;
   display: grid;

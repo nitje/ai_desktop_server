@@ -1417,6 +1417,7 @@ def container_status():
 
 def overview_status():
     return {
+        "runner_version": RUNNER_VERSION,
         "docker": docker_available(),
         "nvidia_smi": nvidia_smi_ok(),
         "nvidia_container_toolkit": nvidia_container_toolkit_ok(),

@@ -45,6 +45,7 @@ last_cpu_sample = None
 
 DEFAULT_UI_SETTINGS = {
     "theme": "dark",
+    "design": "default",
     "poll": {
         "overview": 5000,
         "system": 2000,
@@ -144,6 +145,7 @@ def normalize_ui_settings(data):
     system_temp_unit = view.get("systemTempUnit")
     return {
         "theme": data.get("theme") if data.get("theme") in ("dark", "day") else DEFAULT_UI_SETTINGS["theme"],
+        "design": data.get("design") if data.get("design") in ("default", "neonsys-cyberpunk", "aurora-mesh-gradient", "aura-glassmorphism") else DEFAULT_UI_SETTINGS["design"],
         "poll": {
             "overview": ui_int(poll.get("overview"), DEFAULT_UI_SETTINGS["poll"]["overview"], 1000),
             "system": ui_int(poll.get("system"), DEFAULT_UI_SETTINGS["poll"]["system"], 500),

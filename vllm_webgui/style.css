@@ -140,6 +140,17 @@ th {
   font-weight: 600;
 }
 
+.container-panel-title {
+  justify-content: flex-start;
+}
+
+.container-search {
+  margin-left: auto;
+  min-height: 30px;
+  padding: 5px 8px;
+  width: min(260px, 45vw);
+}
+
 th:nth-child(1), td:nth-child(1) { width: 150px; }
 th:nth-child(2), td:nth-child(2) { width: 80px; }
 th:nth-child(3), td:nth-child(3) { width: 130px; }
@@ -149,6 +160,11 @@ th:nth-child(6), td:nth-child(6) { width: 260px; }
 th:nth-child(7), td:nth-child(7) { width: 50px; }
 th:nth-child(8), td:nth-child(8) { width: 50px; }
 th:nth-child(9), td:nth-child(9) { width: 310px; }
+
+:root[data-design="default"] th:nth-child(9),
+:root[data-design="default"] td:nth-child(9) {
+  width: 295px;
+}
 
 label {
   display: grid;
@@ -247,16 +263,6 @@ label {
 
 .settings-grid label {
   margin-bottom: 0;
-}
-
-.number-stepper {
-  display: grid;
-  gap: 6px;
-  grid-template-columns: 36px minmax(70px, 1fr) 36px;
-}
-
-.number-stepper button {
-  padding: 7px 0;
 }
 
 .settings-checks {
@@ -579,6 +585,575 @@ small.diagnostic {
 #jobLine {
   color: var(--muted);
   font-size: 14px;
+}
+
+:root[data-design="neonsys-cyberpunk"] {
+  color-scheme: dark;
+  --bg: #050505;
+  --panel: #111116;
+  --text: #ffffff;
+  --muted: #80f3ff;
+  --line: rgba(0, 243, 255, 0.42);
+  --accent: #00f3ff;
+  --danger: #ff003c;
+}
+
+:root[data-design="neonsys-cyberpunk"] body {
+  font-family: "Courier New", "Roboto Mono", "Fira Code", monospace;
+  background:
+    linear-gradient(rgba(0, 243, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 0, 255, 0.08) 1px, transparent 1px),
+    radial-gradient(circle at 50% 0%, rgba(0, 243, 255, 0.18), transparent 34%),
+    #050505;
+  background-size: 42px 42px, 42px 42px, 100% 100%, auto;
+}
+
+:root[data-design="neonsys-cyberpunk"] body::before {
+  background: linear-gradient(
+    rgba(255, 255, 255, 0.04) 50%,
+    rgba(0, 0, 0, 0.12) 50%
+  );
+  background-size: 100% 4px;
+  content: "";
+  inset: 0;
+  opacity: 0.32;
+  pointer-events: none;
+  position: fixed;
+  z-index: 9999;
+}
+
+:root[data-design="neonsys-cyberpunk"] header,
+:root[data-design="neonsys-cyberpunk"] .panel,
+:root[data-design="neonsys-cyberpunk"] .modal-panel {
+  background:
+    linear-gradient(135deg, rgba(0, 243, 255, 0.08), transparent 42%),
+    linear-gradient(315deg, rgba(255, 0, 255, 0.07), transparent 36%),
+    rgba(10, 10, 14, 0.96);
+  border-color: var(--line);
+  box-shadow:
+    0 0 0 1px rgba(0, 243, 255, 0.14),
+    0 0 22px rgba(0, 243, 255, 0.14),
+    inset 0 0 28px rgba(0, 243, 255, 0.05);
+}
+
+:root[data-design="neonsys-cyberpunk"] h1,
+:root[data-design="neonsys-cyberpunk"] h2,
+:root[data-design="neonsys-cyberpunk"] .modal-subtitle {
+  color: #ffffff;
+  letter-spacing: 0;
+  text-shadow:
+    0 0 5px #00f3ff,
+    0 0 12px rgba(0, 243, 255, 0.86),
+    0 0 24px rgba(0, 243, 255, 0.44);
+}
+
+:root[data-design="neonsys-cyberpunk"] h1 {
+  color: #00f3ff;
+}
+
+:root[data-design="neonsys-cyberpunk"] input,
+:root[data-design="neonsys-cyberpunk"] select,
+:root[data-design="neonsys-cyberpunk"] button,
+:root[data-design="neonsys-cyberpunk"] #logBox {
+  background: rgba(5, 5, 5, 0.9);
+  border-color: rgba(0, 243, 255, 0.62);
+  color: var(--text);
+  font-family: inherit;
+  box-shadow: inset 0 0 12px rgba(0, 243, 255, 0.08);
+}
+
+:root[data-design="neonsys-cyberpunk"] input:focus,
+:root[data-design="neonsys-cyberpunk"] select:focus,
+:root[data-design="neonsys-cyberpunk"] button:focus-visible {
+  outline: 2px solid #ff00ff;
+  outline-offset: 2px;
+  box-shadow:
+    0 0 10px rgba(255, 0, 255, 0.7),
+    inset 0 0 12px rgba(0, 243, 255, 0.12);
+}
+
+:root[data-design="neonsys-cyberpunk"] button {
+  background: rgba(0, 243, 255, 0.12);
+  border-color: #00f3ff;
+  color: #00f3ff;
+  text-shadow: 0 0 8px rgba(0, 243, 255, 0.9);
+}
+
+:root[data-design="neonsys-cyberpunk"] button:hover {
+  box-shadow: 0 0 14px rgba(0, 243, 255, 0.7);
+}
+
+:root[data-design="neonsys-cyberpunk"] button.secondary {
+  background: rgba(255, 0, 255, 0.08);
+  border-color: #ff00ff;
+  color: #ffb8ff;
+  text-shadow: 0 0 8px rgba(255, 0, 255, 0.75);
+}
+
+:root[data-design="neonsys-cyberpunk"] button.danger {
+  background: rgba(255, 0, 60, 0.15);
+  border-color: #ff003c;
+  color: #ff9aad;
+  text-shadow: 0 0 8px rgba(255, 0, 60, 0.85);
+}
+
+:root[data-design="neonsys-cyberpunk"] th:nth-child(9),
+:root[data-design="neonsys-cyberpunk"] td:nth-child(9) {
+  width: 370px;
+}
+
+:root[data-design="neonsys-cyberpunk"] table {
+  min-width: 1595px;
+}
+
+:root[data-design="neonsys-cyberpunk"] td:nth-child(9) .actions {
+  flex-wrap: nowrap;
+  gap: 5px;
+}
+
+:root[data-design="neonsys-cyberpunk"] td:nth-child(9) button {
+  font-size: 16px;
+  min-height: 28px;
+  padding: 5px 8px;
+}
+
+:root[data-design="neonsys-cyberpunk"] th {
+  color: #80f3ff;
+}
+
+:root[data-design="neonsys-cyberpunk"] tr:hover td {
+  background: rgba(0, 243, 255, 0.04);
+}
+
+:root[data-design="neonsys-cyberpunk"] .badge {
+  background: rgba(0, 243, 255, 0.12);
+  border: 1px solid rgba(0, 243, 255, 0.5);
+  color: #80f3ff;
+}
+
+:root[data-design="neonsys-cyberpunk"] .badge.running {
+  background: rgba(0, 255, 65, 0.12);
+  border-color: rgba(0, 255, 65, 0.55);
+  color: #00ff41;
+}
+
+:root[data-design="neonsys-cyberpunk"] .badge.stopped {
+  background: rgba(255, 255, 0, 0.12);
+  border-color: rgba(255, 255, 0, 0.55);
+  color: #ffff00;
+}
+
+:root[data-design="neonsys-cyberpunk"] .badge.missing {
+  background: rgba(255, 0, 60, 0.12);
+  border-color: rgba(255, 0, 60, 0.55);
+  color: #ff9aad;
+}
+
+:root[data-design="neonsys-cyberpunk"] .metric-track,
+:root[data-design="neonsys-cyberpunk"] .progress-track {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(0, 243, 255, 0.35);
+}
+
+:root[data-design="neonsys-cyberpunk"] .metric-fill,
+:root[data-design="neonsys-cyberpunk"] .progress-fill {
+  background: linear-gradient(90deg, #00ff41, #00f3ff, #ff00ff);
+  box-shadow: 0 0 12px rgba(0, 243, 255, 0.75);
+}
+
+:root[data-design="neonsys-cyberpunk"] .api-link,
+:root[data-design="neonsys-cyberpunk"] .model-link {
+  color: #00f3ff;
+  text-shadow: 0 0 7px rgba(0, 243, 255, 0.65);
+}
+
+:root[data-design="neonsys-cyberpunk"] small.diagnostic,
+:root[data-design="neonsys-cyberpunk"] small.model-size-warning {
+  color: #ffff00;
+  text-shadow: 0 0 7px rgba(255, 255, 0, 0.55);
+}
+
+:root[data-design="neonsys-cyberpunk"] #jobLine,
+:root[data-design="neonsys-cyberpunk"] .startup-line,
+:root[data-design="neonsys-cyberpunk"] small {
+  color: #80f3ff;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :root[data-design="neonsys-cyberpunk"] .progress-track.indeterminate .progress-fill {
+    animation-duration: 0.9s;
+  }
+}
+
+:root[data-design="aurora-mesh-gradient"] {
+  color-scheme: dark;
+  --bg: #050510;
+  --panel: rgba(10, 10, 26, 0.66);
+  --text: #ffffff;
+  --muted: #e0f8ff;
+  --line: rgba(224, 248, 255, 0.22);
+  --accent: #00f2ff;
+  --danger: #ff4fa3;
+}
+
+:root[data-design="aurora-mesh-gradient"] body {
+  font-family: Inter, Poppins, "Segoe UI", system-ui, sans-serif;
+  background:
+    radial-gradient(circle at 18% 18%, rgba(0, 242, 255, 0.46), transparent 32%),
+    radial-gradient(circle at 82% 12%, rgba(188, 19, 254, 0.42), transparent 34%),
+    radial-gradient(circle at 64% 82%, rgba(255, 0, 255, 0.34), transparent 38%),
+    radial-gradient(circle at 10% 86%, rgba(0, 168, 255, 0.34), transparent 34%),
+    #050510;
+  min-height: 100vh;
+}
+
+:root[data-design="aurora-mesh-gradient"] body::before {
+  background:
+    conic-gradient(from 140deg at 50% 50%, rgba(0, 242, 255, 0.2), rgba(188, 19, 254, 0.2), rgba(255, 0, 255, 0.18), rgba(0, 242, 255, 0.2));
+  content: "";
+  filter: blur(54px);
+  inset: -20%;
+  opacity: 0.48;
+  pointer-events: none;
+  position: fixed;
+  transform: translateZ(0);
+  z-index: -1;
+}
+
+:root[data-design="aurora-mesh-gradient"] header,
+:root[data-design="aurora-mesh-gradient"] .panel,
+:root[data-design="aurora-mesh-gradient"] .modal-panel {
+  backdrop-filter: blur(22px);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.06)),
+    rgba(10, 10, 26, 0.58);
+  border-color: rgba(255, 255, 255, 0.2);
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.34),
+    0 0 36px rgba(0, 242, 255, 0.13),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+
+:root[data-design="aurora-mesh-gradient"] h1,
+:root[data-design="aurora-mesh-gradient"] h2,
+:root[data-design="aurora-mesh-gradient"] .modal-subtitle {
+  background: linear-gradient(90deg, #ffffff, #00f2ff, #bc13fe, #ff00ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-shadow: 0 0 24px rgba(0, 242, 255, 0.24);
+}
+
+:root[data-design="aurora-mesh-gradient"] p,
+:root[data-design="aurora-mesh-gradient"] small,
+:root[data-design="aurora-mesh-gradient"] #jobLine,
+:root[data-design="aurora-mesh-gradient"] .startup-line {
+  color: #e0f8ff;
+}
+
+:root[data-design="aurora-mesh-gradient"] input,
+:root[data-design="aurora-mesh-gradient"] select,
+:root[data-design="aurora-mesh-gradient"] #logBox {
+  backdrop-filter: blur(14px);
+  background: rgba(2, 2, 8, 0.42);
+  border-color: rgba(224, 248, 255, 0.24);
+  color: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+:root[data-design="aurora-mesh-gradient"] input:focus,
+:root[data-design="aurora-mesh-gradient"] select:focus,
+:root[data-design="aurora-mesh-gradient"] button:focus-visible {
+  outline: 2px solid rgba(0, 242, 255, 0.92);
+  outline-offset: 2px;
+  box-shadow: 0 0 22px rgba(0, 242, 255, 0.42);
+}
+
+:root[data-design="aurora-mesh-gradient"] button {
+  background: linear-gradient(135deg, #00f2ff, #bc13fe 52%, #ff00ff);
+  border-color: rgba(255, 255, 255, 0.28);
+  color: #ffffff;
+  box-shadow: 0 0 24px rgba(188, 19, 254, 0.3);
+}
+
+:root[data-design="aurora-mesh-gradient"] button:hover {
+  box-shadow: 0 0 34px rgba(0, 242, 255, 0.42);
+}
+
+:root[data-design="aurora-mesh-gradient"] button.secondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+:root[data-design="aurora-mesh-gradient"] button.danger {
+  background: linear-gradient(135deg, #ff4fa3, #bc13fe);
+  border-color: rgba(255, 79, 163, 0.7);
+}
+
+:root[data-design="aurora-mesh-gradient"] th {
+  color: #e0f8ff;
+}
+
+:root[data-design="aurora-mesh-gradient"] tr:hover td {
+  background: rgba(255, 255, 255, 0.045);
+}
+
+:root[data-design="aurora-mesh-gradient"] .badge {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: #e0f8ff;
+}
+
+:root[data-design="aurora-mesh-gradient"] .badge.running {
+  background: rgba(0, 242, 255, 0.16);
+  border-color: rgba(0, 242, 255, 0.36);
+  color: #bffbff;
+}
+
+:root[data-design="aurora-mesh-gradient"] .badge.stopped {
+  background: rgba(188, 19, 254, 0.16);
+  border-color: rgba(188, 19, 254, 0.42);
+  color: #e8ccff;
+}
+
+:root[data-design="aurora-mesh-gradient"] .badge.missing {
+  background: rgba(255, 79, 163, 0.16);
+  border-color: rgba(255, 79, 163, 0.42);
+  color: #ffd0e5;
+}
+
+:root[data-design="aurora-mesh-gradient"] .metric-track,
+:root[data-design="aurora-mesh-gradient"] .progress-track {
+  background: rgba(2, 2, 8, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+:root[data-design="aurora-mesh-gradient"] .metric-fill,
+:root[data-design="aurora-mesh-gradient"] .progress-fill {
+  background: linear-gradient(90deg, #00f2ff, #bc13fe, #ff00ff);
+  box-shadow: 0 0 20px rgba(0, 242, 255, 0.38);
+}
+
+:root[data-design="aurora-mesh-gradient"] .api-link,
+:root[data-design="aurora-mesh-gradient"] .model-link {
+  color: #bffbff;
+  text-shadow: 0 0 12px rgba(0, 242, 255, 0.38);
+}
+
+:root[data-design="aurora-mesh-gradient"] small.diagnostic,
+:root[data-design="aurora-mesh-gradient"] small.model-size-warning {
+  color: #ffd0e5;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :root[data-design="aurora-mesh-gradient"] body::before {
+    animation: aurora-flow 18s ease-in-out infinite alternate;
+  }
+}
+
+@keyframes aurora-flow {
+  from {
+    transform: translate3d(-3%, -2%, 0) rotate(0deg) scale(1);
+  }
+  to {
+    transform: translate3d(3%, 2%, 0) rotate(18deg) scale(1.08);
+  }
+}
+
+:root[data-design="aura-glassmorphism"] {
+  color-scheme: dark;
+  --bg: #0f0c29;
+  --panel: rgba(255, 255, 255, 0.11);
+  --text: #ffffff;
+  --muted: #e0e0e0;
+  --line: rgba(255, 255, 255, 0.24);
+  --accent: #00d4ff;
+  --danger: #ff4fa3;
+}
+
+:root[data-design="aura-glassmorphism"] body {
+  font-family: Inter, Poppins, "Segoe UI", system-ui, sans-serif;
+  background:
+    radial-gradient(circle at 12% 18%, rgba(0, 212, 255, 0.34), transparent 30%),
+    radial-gradient(circle at 88% 16%, rgba(188, 19, 254, 0.34), transparent 34%),
+    radial-gradient(circle at 70% 84%, rgba(255, 0, 255, 0.24), transparent 35%),
+    linear-gradient(135deg, #0f0c29, #302b63 52%, #24243e);
+  min-height: 100vh;
+}
+
+:root[data-design="aura-glassmorphism"] body::before {
+  background:
+    radial-gradient(circle at 26% 34%, rgba(255, 255, 255, 0.18), transparent 18%),
+    radial-gradient(circle at 72% 24%, rgba(0, 212, 255, 0.18), transparent 22%),
+    radial-gradient(circle at 56% 78%, rgba(255, 0, 255, 0.14), transparent 20%);
+  content: "";
+  filter: blur(26px);
+  inset: 0;
+  opacity: 0.78;
+  pointer-events: none;
+  position: fixed;
+  z-index: -1;
+}
+
+:root[data-design="aura-glassmorphism"] header,
+:root[data-design="aura-glassmorphism"] .panel,
+:root[data-design="aura-glassmorphism"] .modal-panel {
+  backdrop-filter: blur(18px);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.08)),
+    rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.28);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.37),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+:root[data-design="aura-glassmorphism"] h1,
+:root[data-design="aura-glassmorphism"] h2,
+:root[data-design="aura-glassmorphism"] .modal-subtitle {
+  color: #ffffff;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.34);
+}
+
+:root[data-design="aura-glassmorphism"] h1 {
+  background: linear-gradient(90deg, #ffffff, #00d4ff, #bc13fe, #ff00ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+:root[data-design="aura-glassmorphism"] input,
+:root[data-design="aura-glassmorphism"] select,
+:root[data-design="aura-glassmorphism"] #logBox {
+  backdrop-filter: blur(14px);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.28);
+  color: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+
+:root[data-design="aura-glassmorphism"] input::placeholder {
+  color: rgba(255, 255, 255, 0.66);
+}
+
+:root[data-design="aura-glassmorphism"] select option {
+  background: #24243e;
+  color: #ffffff;
+}
+
+:root[data-design="aura-glassmorphism"] input:focus,
+:root[data-design="aura-glassmorphism"] select:focus,
+:root[data-design="aura-glassmorphism"] button:focus-visible {
+  outline: 2px solid rgba(0, 212, 255, 0.92);
+  outline-offset: 2px;
+  box-shadow:
+    0 0 0 4px rgba(0, 212, 255, 0.16),
+    0 0 22px rgba(0, 212, 255, 0.34);
+}
+
+:root[data-design="aura-glassmorphism"] button {
+  backdrop-filter: blur(14px);
+  background: linear-gradient(135deg, rgba(0, 212, 255, 0.92), rgba(188, 19, 254, 0.92));
+  border-color: rgba(255, 255, 255, 0.34);
+  color: #ffffff;
+  box-shadow:
+    0 10px 24px rgba(0, 0, 0, 0.24),
+    0 0 20px rgba(0, 212, 255, 0.18);
+}
+
+:root[data-design="aura-glassmorphism"] button:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 14px 30px rgba(0, 0, 0, 0.3),
+    0 0 28px rgba(0, 212, 255, 0.28);
+}
+
+:root[data-design="aura-glassmorphism"] button.secondary {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+:root[data-design="aura-glassmorphism"] button.danger {
+  background: linear-gradient(135deg, rgba(255, 79, 163, 0.92), rgba(188, 19, 254, 0.82));
+  border-color: rgba(255, 255, 255, 0.32);
+}
+
+:root[data-design="aura-glassmorphism"] th {
+  color: #f0f0f0;
+}
+
+:root[data-design="aura-glassmorphism"] td {
+  color: #ffffff;
+}
+
+:root[data-design="aura-glassmorphism"] tr:hover td {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+:root[data-design="aura-glassmorphism"] .badge {
+  backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  color: #ffffff;
+}
+
+:root[data-design="aura-glassmorphism"] .badge.running {
+  background: rgba(0, 212, 255, 0.18);
+  border-color: rgba(0, 212, 255, 0.42);
+  color: #dff9ff;
+}
+
+:root[data-design="aura-glassmorphism"] .badge.stopped {
+  background: rgba(188, 19, 254, 0.18);
+  border-color: rgba(188, 19, 254, 0.42);
+  color: #f1dcff;
+}
+
+:root[data-design="aura-glassmorphism"] .badge.missing {
+  background: rgba(255, 79, 163, 0.18);
+  border-color: rgba(255, 79, 163, 0.42);
+  color: #ffe0ed;
+}
+
+:root[data-design="aura-glassmorphism"] .metric-track,
+:root[data-design="aura-glassmorphism"] .progress-track {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+:root[data-design="aura-glassmorphism"] .metric-fill,
+:root[data-design="aura-glassmorphism"] .progress-fill {
+  background: linear-gradient(90deg, #00d4ff, #bc13fe, #ff00ff);
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
+}
+
+:root[data-design="aura-glassmorphism"] .api-link,
+:root[data-design="aura-glassmorphism"] .model-link {
+  color: #dff9ff;
+  text-shadow: 0 0 12px rgba(0, 212, 255, 0.26);
+}
+
+:root[data-design="aura-glassmorphism"] p,
+:root[data-design="aura-glassmorphism"] small,
+:root[data-design="aura-glassmorphism"] #jobLine,
+:root[data-design="aura-glassmorphism"] .startup-line {
+  color: #e0e0e0;
+}
+
+:root[data-design="aura-glassmorphism"] small.diagnostic,
+:root[data-design="aura-glassmorphism"] small.model-size-warning {
+  color: #ffd7e9;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :root[data-design="aura-glassmorphism"] .panel,
+  :root[data-design="aura-glassmorphism"] button {
+    transition: transform 0.3s ease-out, box-shadow 0.3s ease-out, border-color 0.3s ease-out;
+  }
 }
 
 @media (max-width: 900px) {

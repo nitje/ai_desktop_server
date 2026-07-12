@@ -37,7 +37,10 @@
     </section>
 
     <section class="panel">
-      <h2>Container</h2>
+      <div class="panel-title container-panel-title">
+        <h2>Container</h2>
+        <input id="containerSearch" class="container-search" type="search" placeholder="Suche">
+      </div>
       <div class="table-wrap">
         <table>
           <thead>
@@ -181,6 +184,17 @@
         <h2 id="settingsModalTitle">Einstellungen</h2>
         <button type="button" id="settingsModalCloseBtn" class="icon-button secondary" title="Schliessen">x</button>
       </div>
+      <h2 class="modal-subtitle">Design</h2>
+      <div class="settings-grid settings-grid-two">
+        <label>Design Auswahl
+          <select id="designSelect">
+            <option value="default">Default</option>
+            <option value="neonsys-cyberpunk">NeonSys Cyberpunk Interface</option>
+            <option value="aurora-mesh-gradient">Aurora 2.0 - Mesh Gradient Interface</option>
+            <option value="aura-glassmorphism">Aura - Glassmorphism Interface</option>
+          </select>
+        </label>
+      </div>
       <h2 class="modal-subtitle">Aktualisierung Interval in ms von Cards</h2>
       <div class="settings-grid">
         <label>NVIDIA / Docker
@@ -221,11 +235,7 @@
           <input id="containerLimitInput" type="number" min="1" step="1">
         </label>
         <label>Warngrenze Modell Size -8GB Reserve
-          <div class="number-stepper">
-            <button type="button" class="secondary" data-stepper-target="modelSizeWarnReserveInput" data-stepper-delta="-1">-</button>
-            <input id="modelSizeWarnReserveInput" type="number" min="0" step="1">
-            <button type="button" class="secondary" data-stepper-target="modelSizeWarnReserveInput" data-stepper-delta="1">+</button>
-          </div>
+          <input id="modelSizeWarnReserveInput" type="number" min="0" step="1">
         </label>
         <label>Container sortieren nach
           <select id="containerSortInput">

@@ -29,6 +29,7 @@ const overviewIntervalInput = document.getElementById("overviewIntervalInput");
 const systemIntervalInput = document.getElementById("systemIntervalInput");
 const containersIntervalInput = document.getElementById("containersIntervalInput");
 const logsIntervalInput = document.getElementById("logsIntervalInput");
+const designSelect = document.getElementById("designSelect");
 const containerLimitInput = document.getElementById("containerLimitInput");
 const modelSizeWarnReserveInput = document.getElementById("modelSizeWarnReserveInput");
 const containerSortInput = document.getElementById("containerSortInput");
@@ -40,6 +41,7 @@ const showLogsCard = document.getElementById("showLogsCard");
 const containerLimitControls = document.getElementById("containerLimitControls");
 const containerLimitSummary = document.getElementById("containerLimitSummary");
 const containerLimitToggleBtn = document.getElementById("containerLimitToggleBtn");
+const containerSearch = document.getElementById("containerSearch");
 const modelFormat = document.getElementById("modelFormat");
 const ggufFields = document.getElementById("ggufFields");
 const modelLabel = document.getElementById("modelLabel");
@@ -83,11 +85,14 @@ const defaultViewSettings = {
 
 const defaultUiSettings = {
   theme: "dark",
+  design: "default",
   poll: defaultPollSettings,
   cards: defaultCardSettings,
   view: defaultViewSettings,
   selected_disks: null,
 };
+
+const availableDesigns = new Set(["default", "neonsys-cyberpunk", "aurora-mesh-gradient", "aura-glassmorphism"]);
 
 let uiSettings = normalizeUiSettings(defaultUiSettings);
 
@@ -331,8 +336,10 @@ function normalizeUiSettings(settings = {}) {
   const vramSizeUnit = sizeUnits.has(view.vramSizeUnit) ? view.vramSizeUnit : (legacySizeUnit || defaultViewSettings.vramSizeUnit);
   const diskSizeUnit = sizeUnits.has(view.diskSizeUnit) ? view.diskSizeUnit : (legacySizeUnit || defaultViewSettings.diskSizeUnit);
   const systemTempUnit = tempUnits.has(view.systemTempUnit) ? view.systemTempUnit : defaultViewSettings.systemTempUnit;
+  const design = availableDesigns.has(settings.design) ? settings.design : "default";
   return {
     theme: settings.theme === "day" ? "day" : "dark",
+    design,
     poll: {
       overview: Math.max(1000, Number(poll.overview) || defaultPollSettings.overview),
       system: Math.max(500, Number(poll.system) || defaultPollSettings.system),
@@ -600,6 +607,7 @@ async function toggleSystemMetric(kind) {
 function fillSettingsForm(settings = readPollSettings()) {
   const cardSettings = readCardSettings();
   const viewSettings = readViewSettings();
+  designSelect.value = uiSettings.design || defaultUiSettings.design;
   overviewIntervalInput.value = settings.overview;
   systemIntervalInput.value = settings.system;
   containersIntervalInput.value = settings.containers;
@@ -624,6 +632,7 @@ function closeSettingsModal() {
 }
 
 async function applySettings() {
+  applyDesign(designSelect.value);
   savePollSettings({
     overview: overviewIntervalInput.value,
     system: systemIntervalInput.value,
@@ -651,6 +660,7 @@ async function applySettings() {
 
 async function resetSettings() {
   const settings = savePollSettings(defaultPollSettings);
+  applyDesign(defaultUiSettings.design);
   applyCardVisibility(saveCardSettings(defaultCardSettings));
   saveViewSettings(defaultViewSettings);
   showAllContainers = false;
@@ -668,8 +678,18 @@ function applyTheme(theme, persist = false) {
   if (persist) persistUiSettings();
 }
 
+function applyDesign(design, persist = false) {
+  const normalized = availableDesigns.has(design) ? design : "default";
+  uiSettings.design = normalized;
+  document.documentElement.dataset.design = normalized;
+  themeToggleBtn.classList.toggle("hidden", normalized !== "default");
+  if (designSelect) designSelect.value = normalized;
+  if (persist) persistUiSettings();
+}
+
 function initTheme() {
   applyTheme(uiSettings.theme || "dark");
+  applyDesign(uiSettings.design || "default");
 }
 
 function fillForm(item = {}) {
@@ -813,17 +833,85 @@ function sortContainers(containers) {
   });
 }
 
+function normalizeSearch(value) {
+  return String(value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function containerSearchText(container) {
+  const apiStatus = container.api_ready ? "api_ready ready" : "api_not_ready not_ready";
+  const autostart = container.autostart ? "autostart ja yes an aktiv" : "autostart nein no aus inaktiv";
+  const configStatus = container.config_current ? "config aktuell" : "config geaendert geändert";
+  return [
+    container.name,
+    container.status,
+    apiStatus,
+    container.profile,
+    container.model_format,
+    container.model,
+    container.gguf_repo,
+    container.gguf_file,
+    container.gguf_url,
+    container.tokenizer,
+    container.hf_config_path,
+    container.port,
+    autostart,
+    configStatus,
+    container.api_url,
+    container.api_models_url,
+    container.download_progress?.label,
+    container.startup_status?.text,
+    container.diagnostic,
+  ].map((value) => String(value ?? "").toLowerCase()).join(" ");
+}
+
+function applyApiSearchRule(container, query) {
+  let remaining = ` ${normalizeSearch(query)} `;
+  const notReadyPhrases = ["api nicht bereit", "api not ready", "api_not_ready", "api-not-ready"];
+  const readyPhrases = ["api bereit", "api ready", "api_ready", "api-ready"];
+  if (notReadyPhrases.some((phrase) => remaining.includes(` ${phrase} `))) {
+    if (container.api_ready) return null;
+    notReadyPhrases.forEach((phrase) => {
+      remaining = remaining.replaceAll(` ${phrase} `, " ");
+    });
+  } else if (readyPhrases.some((phrase) => remaining.includes(` ${phrase} `))) {
+    if (!container.api_ready) return null;
+    readyPhrases.forEach((phrase) => {
+      remaining = remaining.replaceAll(` ${phrase} `, " ");
+    });
+  }
+  return remaining.trim();
+}
+
+function matchesContainerSearch(container, query) {
+  const remainingQuery = applyApiSearchRule(container, query);
+  if (remainingQuery === null) return false;
+  const terms = remainingQuery.split(/\s+/).filter(Boolean);
+  if (!terms.length) return true;
+  const haystack = containerSearchText(container);
+  return terms.every((term) => haystack.includes(term));
+}
+
 function renderRows() {
-  const containers = sortContainers(state?.containers || []);
+  const allContainers = sortContainers(state?.containers || []);
+  const searchQuery = normalizeSearch(containerSearch?.value);
+  const containers = searchQuery
+    ? allContainers.filter((container) => matchesContainerSearch(container, searchQuery))
+    : allContainers;
   if (!containers.length) {
-    rows.innerHTML = `<tr><td colspan="9">Noch keine Container konfiguriert.</td></tr>`;
+    rows.innerHTML = `<tr><td colspan="9">${searchQuery ? "Keine Container fuer diese Suche." : "Noch keine Container konfiguriert."}</td></tr>`;
     containerLimitControls.classList.add("hidden");
     return;
   }
   const limit = readViewSettings().containerLimit;
-  const visibleContainers = showAllContainers ? containers : containers.slice(0, limit);
-  const hasHiddenContainers = containers.length > limit;
+  const visibleContainers = searchQuery || showAllContainers ? containers : containers.slice(0, limit);
+  const hasHiddenContainers = !searchQuery && containers.length > limit;
   containerLimitControls.classList.toggle("hidden", !hasHiddenContainers);
+  containerLimitToggleBtn.classList.remove("hidden");
+  if (searchQuery) {
+    containerLimitControls.classList.remove("hidden");
+    containerLimitSummary.textContent = `Suche: ${containers.length} von ${allContainers.length} Containern`;
+    containerLimitToggleBtn.classList.add("hidden");
+  }
   if (hasHiddenContainers) {
     containerLimitSummary.textContent = showAllContainers
       ? `Zeige alle ${containers.length} Container`
@@ -1015,6 +1103,9 @@ settingsModal.addEventListener("click", (event) => {
 });
 containerLimitToggleBtn.addEventListener("click", () => {
   showAllContainers = !showAllContainers;
+  renderRows();
+});
+containerSearch.addEventListener("input", () => {
   renderRows();
 });
 document.querySelectorAll("[data-stepper-target]").forEach((button) => {

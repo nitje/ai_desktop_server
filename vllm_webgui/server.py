@@ -211,6 +211,22 @@ def startup_entry_unlocked(stats, name):
     return containers.setdefault(name, {"cold": [], "restart": []})
 
 
+def rename_startup_stats(old_name, new_name):
+    if not old_name or old_name == new_name:
+        return
+    with startup_lock:
+        stats = load_startup_stats_unlocked()
+        containers = stats.setdefault("containers", {})
+        if old_name not in containers:
+            return
+        new_entry = containers.setdefault(new_name, {"cold": [], "restart": []})
+        old_entry = containers.pop(old_name)
+        for key, value in old_entry.items():
+            if key not in new_entry or not new_entry.get(key):
+                new_entry[key] = value
+        save_startup_stats_unlocked(stats)
+
+
 def record_start_attempt(name, kind):
     with startup_lock:
         stats = load_startup_stats_unlocked()
@@ -264,6 +280,108 @@ def format_duration(seconds):
     if minutes:
         return f"{minutes}m {secs:02d}s"
     return f"{secs}s"
+
+
+def format_runtime_duration(seconds):
+    seconds = max(0, int(seconds or 0))
+    minutes, secs = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    days, hours = divmod(hours, 24)
+    if days:
+        return f"{days}d {hours:02d}h"
+    if hours:
+        return f"{hours}h {minutes:02d}m"
+    if minutes:
+        return f"{minutes}m {secs:02d}s"
+    return f"{secs}s"
+
+
+def runtime_status_for(name, api_ready):
+    now = time.time()
+    with startup_lock:
+        stats = load_startup_stats_unlocked()
+        entry = startup_entry_unlocked(stats, name)
+        runtime = entry.setdefault("runtime", {})
+        total = max(0.0, float(runtime.get("total_seconds", 0) or 0))
+        last_seen = runtime.get("last_ready_seen_at")
+        changed = False
+
+        if api_ready:
+            if last_seen:
+                delta = max(0.0, now - float(last_seen))
+                if delta >= 0.5:
+                    total += delta
+                    changed = True
+            else:
+                runtime["active_since"] = now
+                changed = True
+            runtime["last_ready_seen_at"] = now
+            runtime["active"] = True
+            runtime["total_seconds"] = int(total)
+            runtime["updated_at"] = int(now)
+        else:
+            if runtime.get("active") or runtime.get("last_ready_seen_at") or runtime.get("active_since"):
+                runtime["active"] = False
+                runtime.pop("last_ready_seen_at", None)
+                runtime.pop("active_since", None)
+                runtime["updated_at"] = int(now)
+                changed = True
+
+        if changed:
+            save_startup_stats_unlocked(stats)
+
+        total_seconds = int(runtime.get("total_seconds", 0) or 0)
+        return {
+            "total_seconds": total_seconds,
+            "text": f"Laufzeit {format_runtime_duration(total_seconds)}",
+            "active": bool(api_ready),
+        }
+
+
+def finalize_runtime_tracking(name):
+    now = time.time()
+    with startup_lock:
+        stats = load_startup_stats_unlocked()
+        entry = stats.get("containers", {}).get(name)
+        if not entry:
+            return
+        runtime = entry.setdefault("runtime", {})
+        last_seen = runtime.get("last_ready_seen_at")
+        total = max(0.0, float(runtime.get("total_seconds", 0) or 0))
+        if last_seen:
+            total += max(0.0, now - float(last_seen))
+        runtime["total_seconds"] = int(total)
+        runtime["active"] = False
+        runtime.pop("last_ready_seen_at", None)
+        runtime.pop("active_since", None)
+        runtime["updated_at"] = int(now)
+        save_startup_stats_unlocked(stats)
+
+
+def set_runtime_seconds(name, seconds):
+    seconds = max(0, int(seconds or 0))
+    item = find_config(name)
+    api_ready = api_status_ready(item) if item and container_running(name) else False
+    now = time.time()
+    with startup_lock:
+        stats = load_startup_stats_unlocked()
+        entry = startup_entry_unlocked(stats, name)
+        runtime = entry.setdefault("runtime", {})
+        runtime["total_seconds"] = seconds
+        runtime["active"] = bool(api_ready)
+        runtime["updated_at"] = int(now)
+        if api_ready:
+            runtime["last_ready_seen_at"] = now
+            runtime.setdefault("active_since", now)
+        else:
+            runtime.pop("last_ready_seen_at", None)
+            runtime.pop("active_since", None)
+        save_startup_stats_unlocked(stats)
+        return {
+            "total_seconds": seconds,
+            "text": f"Laufzeit {format_runtime_duration(seconds)}",
+            "active": bool(api_ready),
+        }
 
 
 def startup_status_for(name, status, api_ready):
@@ -1028,6 +1146,7 @@ def job_start_container(job_id, name):
 
 
 def job_stop_container(job_id, name):
+    finalize_runtime_tracking(name)
     if container_exists(name):
         stream_command(job_id, ["docker", "stop", name])
         clear_start_attempt(name)
@@ -1037,6 +1156,7 @@ def job_stop_container(job_id, name):
 
 
 def job_remove_container(job_id, name, remove_cache=False):
+    finalize_runtime_tracking(name)
     if container_exists(name):
         stream_command(job_id, ["docker", "rm", "-f", name])
     clear_start_attempt(name)
@@ -1373,6 +1493,7 @@ def docker_status_for(item):
     progress = download_progress_for(item, status, api_ready)
     diagnostic = diagnose_logs(tail_logs(name, lines=260)) if status != "missing" and not api_ready else ""
     startup_status = startup_status_for(name, status, api_ready)
+    runtime_status = runtime_status_for(name, api_ready)
     model_size = model_size_for(item)
     return {
         "status": status,
@@ -1382,6 +1503,9 @@ def docker_status_for(item):
         "api_models_url": f"{api_url}/models" if api_ready else "",
         "diagnostic": diagnostic,
         "startup_status": startup_status,
+        "runtime_status": runtime_status,
+        "runtime_total_seconds": runtime_status["total_seconds"],
+        "runtime_total_text": runtime_status["text"],
         "download_progress": progress,
         "model_size_bytes": model_size,
         "model_size_label": human_size(model_size) if model_size else "",
@@ -1507,6 +1631,7 @@ class Handler(SimpleHTTPRequestHandler):
                 if not item.get("hf_token") and old_item and old_item.get("hf_token"):
                     item["hf_token"] = old_item["hf_token"]
                 rename_cache_dir(old_name, item["name"])
+                rename_startup_stats(old_name, item["name"])
                 removed_cache = cleanup_stale_hf_cache(item)
                 upsert_config(item)
                 self.send_json({
@@ -1527,6 +1652,11 @@ class Handler(SimpleHTTPRequestHandler):
                 parts = parsed.path.strip("/").split("/")
                 name = parts[2]
                 action = parts[3] if len(parts) > 3 else ""
+                if action == "runtime":
+                    data = self.read_json()
+                    seconds = int(data.get("seconds", 0) or 0)
+                    self.send_json({"ok": True, "runtime_status": set_runtime_seconds(name, seconds)})
+                    return
                 if action == "start":
                     job_id = start_background(f"start {name}", job_start_container, name)
                     self.send_json({"ok": True, "job_id": job_id})

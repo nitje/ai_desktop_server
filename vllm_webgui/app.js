@@ -57,6 +57,9 @@ let selectedDiskKeys = null;
 let pollTimers = {};
 let pollBusy = {overview: false, system: false, containers: false, logs: false};
 let showAllContainers = false;
+let runtimeEditMode = false;
+let runtimeEditDrafts = {};
+let settingsSecretBuffer = "";
 
 const defaultPollSettings = {
   overview: 5000,
@@ -268,6 +271,45 @@ function badge(status, kind = "") {
 function startupLine(status = {}) {
   if (!status.text) return "";
   return `<div class="startup-line" title="${escapeHtml(status.title || status.text)}">${escapeHtml(status.text)}</div>`;
+}
+
+function secondsToHms(seconds) {
+  const total = Math.max(0, Math.floor(Number(seconds || 0)));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  return `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
+
+function hmsToSeconds(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  if (/^\d+$/.test(text)) return Number(text);
+  const parts = text.split(":");
+  if (parts.length < 2 || parts.length > 3) return null;
+  if (!parts.every((part) => /^\d+$/.test(part))) return null;
+  const values = parts.map(Number);
+  if (parts.length === 2) {
+    return values[0] * 60 + values[1];
+  }
+  return values[0] * 3600 + values[1] * 60 + values[2];
+}
+
+function runtimeLine(name, status = {}) {
+  const text = status.text || "Laufzeit 0s";
+  const title = status.active ? "Zaehlt, solange die API bereit ist." : "Gespeicherte gesamte API-Laufzeit.";
+  if (runtimeEditMode) {
+    const value = Object.prototype.hasOwnProperty.call(runtimeEditDrafts, name)
+      ? runtimeEditDrafts[name]
+      : secondsToHms(status.total_seconds || 0);
+    return `
+      <span class="runtime-edit">
+        <input class="runtime-input" data-runtime-input data-name="${escapeHtml(name)}" type="text" inputmode="numeric" value="${escapeHtml(value)}" placeholder="h:m:s">
+        <button type="button" class="runtime-save secondary" data-act="runtime-save" data-name="${escapeHtml(name)}" title="Laufzeit uebernehmen">v</button>
+      </span>
+    `;
+  }
+  return `<small class="runtime-line" title="${escapeHtml(title)}">${escapeHtml(text)}</small>`;
 }
 
 function formatNumber(value, digits = 0) {
@@ -749,7 +791,7 @@ async function refreshOverview() {
   const data = await api("/api/overview");
   state = {...(state || {}), ...data};
   const version = escapeHtml(state.runner_version || "local");
-  statusLine.innerHTML = `Version 0.51 - Hotfix: ${version} | &copy; 2026 <a href="https://interceptor.marconitschke.de/thread-157.html" target="_blank" rel="noopener noreferrer">Marco Nitschke</a> | <a href="https://hub.docker.com/u/nitje" target="_blank" rel="noopener noreferrer">DockerHub</a> | <a href="https://github.com/nitje" target="_blank" rel="noopener noreferrer">GitHub</a> | <a href="https://github.com/vllm-project/vllm" target="_blank" rel="noopener noreferrer">vLLM Projekt</a>`;
+  statusLine.innerHTML = `Version 0.52 - Hotfix: ${version} | &copy; 2026 <a href="https://interceptor.marconitschke.de/thread-157.html" target="_blank" rel="noopener noreferrer">Marco Nitschke</a> | <a href="https://hub.docker.com/u/nitje" target="_blank" rel="noopener noreferrer">DockerHub</a> | <a href="https://github.com/nitje" target="_blank" rel="noopener noreferrer">GitHub</a> | <a href="https://github.com/vllm-project/vllm" target="_blank" rel="noopener noreferrer">vLLM Projekt</a>`;
   renderNvidiaStatus();
 }
 
@@ -861,6 +903,8 @@ function containerSearchText(container) {
     container.api_models_url,
     container.download_progress?.label,
     container.startup_status?.text,
+    container.runtime_status?.text,
+    container.runtime_total_text,
     container.diagnostic,
   ].map((value) => String(value ?? "").toLowerCase()).join(" ");
 }
@@ -925,7 +969,7 @@ function renderRows() {
       : `${escapeHtml(c.model)}${hfLink(c.model)}${modelSizeLine(c)}`;
     return `
     <tr>
-      <td><strong>${escapeHtml(c.name)}</strong></td>
+      <td><strong>${escapeHtml(c.name)}</strong><br>${runtimeLine(c.name, c.runtime_status)}</td>
       <td>${badge(c.status, c.status)}${c.config_current ? "" : "<br><small>Config geaendert</small>"}</td>
       <td class="api-status-cell">
         <div class="api-status-block">
@@ -1036,6 +1080,18 @@ rows.addEventListener("click", async (event) => {
     if (action === "edit") {
       fillForm(item);
       return;
+    } else if (action === "runtime-save") {
+      const input = button.closest(".runtime-edit")?.querySelector("[data-runtime-input]");
+      const seconds = hmsToSeconds(input?.value);
+      if (seconds === null) {
+        alert("Bitte Laufzeit als h:m:s eingeben, z.B. 1:23:45.");
+        return;
+      }
+      await api(`/api/containers/${encodeURIComponent(name)}/runtime`, {method: "POST", body: JSON.stringify({seconds})});
+      runtimeEditMode = false;
+      runtimeEditDrafts = {};
+      await refreshContainers();
+      return;
     } else if (action === "start") {
       await startJob("start", name);
     } else if (action === "stop") {
@@ -1102,12 +1158,38 @@ settingsModalCloseBtn.addEventListener("click", closeSettingsModal);
 settingsModal.addEventListener("click", (event) => {
   if (event.target.dataset.closeModal === "settings") closeSettingsModal();
 });
+document.addEventListener("keydown", (event) => {
+  if (settingsModal.classList.contains("hidden")) {
+    settingsSecretBuffer = "";
+    return;
+  }
+  if (event.ctrlKey || event.altKey || event.metaKey || event.key.length !== 1) return;
+  settingsSecretBuffer = `${settingsSecretBuffer}${event.key.toLowerCase()}`.slice(-3);
+  if (settingsSecretBuffer === "css") {
+    runtimeEditMode = true;
+    runtimeEditDrafts = {};
+    settingsSecretBuffer = "";
+    renderRows();
+  }
+});
 containerLimitToggleBtn.addEventListener("click", () => {
   showAllContainers = !showAllContainers;
   renderRows();
 });
 containerSearch.addEventListener("input", () => {
   renderRows();
+});
+rows.addEventListener("input", (event) => {
+  const input = event.target.closest("[data-runtime-input]");
+  if (!input) return;
+  runtimeEditDrafts[input.dataset.name || ""] = input.value;
+});
+rows.addEventListener("keydown", async (event) => {
+  if (event.key !== "Enter") return;
+  const input = event.target.closest("[data-runtime-input]");
+  if (!input) return;
+  event.preventDefault();
+  input.closest(".runtime-edit")?.querySelector("[data-act='runtime-save']")?.click();
 });
 document.querySelectorAll("[data-stepper-target]").forEach((button) => {
   button.addEventListener("click", () => {

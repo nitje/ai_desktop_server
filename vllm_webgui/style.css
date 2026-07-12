@@ -591,6 +591,38 @@ small.diagnostic {
   white-space: nowrap;
 }
 
+.runtime-line {
+  color: var(--muted);
+  cursor: help;
+  display: inline-block;
+  font-size: 12px;
+  margin-top: 3px;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-edit {
+  align-items: center;
+  display: inline-grid;
+  gap: 4px;
+  grid-template-columns: minmax(72px, 86px) 28px;
+  margin-top: 4px;
+}
+
+.runtime-input {
+  font-size: 12px;
+  min-height: 28px;
+  padding: 4px 6px;
+}
+
+button.runtime-save {
+  font-size: 12px;
+  min-height: 28px;
+  padding: 4px 0;
+}
+
 .api-link:hover,
 .model-link:hover {
   text-decoration: underline;
@@ -789,6 +821,7 @@ small.diagnostic {
 
 :root[data-design="neonsys-cyberpunk"] #jobLine,
 :root[data-design="neonsys-cyberpunk"] .startup-line,
+:root[data-design="neonsys-cyberpunk"] .runtime-line,
 :root[data-design="neonsys-cyberpunk"] small {
   color: #80f3ff;
 }
@@ -863,7 +896,8 @@ small.diagnostic {
 :root[data-design="aurora-mesh-gradient"] p,
 :root[data-design="aurora-mesh-gradient"] small,
 :root[data-design="aurora-mesh-gradient"] #jobLine,
-:root[data-design="aurora-mesh-gradient"] .startup-line {
+:root[data-design="aurora-mesh-gradient"] .startup-line,
+:root[data-design="aurora-mesh-gradient"] .runtime-line {
   color: #e0f8ff;
 }
 
@@ -1154,7 +1188,8 @@ small.diagnostic {
 :root[data-design="aura-glassmorphism"] p,
 :root[data-design="aura-glassmorphism"] small,
 :root[data-design="aura-glassmorphism"] #jobLine,
-:root[data-design="aura-glassmorphism"] .startup-line {
+:root[data-design="aura-glassmorphism"] .startup-line,
+:root[data-design="aura-glassmorphism"] .runtime-line {
   color: #e0e0e0;
 }
 

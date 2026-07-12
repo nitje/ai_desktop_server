@@ -29,7 +29,7 @@ PORT = int(os.environ.get("VLLM_WEBGUI_PORT", "18000"))
 
 DEFAULT_IMAGE = "vllm/vllm-openai:latest"
 DEFAULT_MODEL = "Qwen/Qwen3-0.6B"
-RUNNER_VERSION = "2026-07-12-gguf-container-cache"
+RUNNER_VERSION = "2026-07-12-container-autostart-failed"
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,63}$")
 PERCENT_RE = re.compile(r"(?<!\d)(100|[0-9]{1,2})(?:\.\d+)?%")
 SIZE_RE = re.compile(r"([0-9]+(?:\.[0-9]+)?)\s*([KMGT]?i?B)\s*/\s*([0-9]+(?:\.[0-9]+)?)\s*([KMGT]?i?B)", re.IGNORECASE)
@@ -81,6 +81,15 @@ def run(cmd, check=False, timeout=None):
 
 def docker_available():
     return shutil.which("docker") is not None
+
+
+def docker_daemon_ready():
+    if not docker_available():
+        return False
+    try:
+        return run(["docker", "info"], timeout=5).returncode == 0
+    except Exception:
+        return False
 
 
 def nvidia_smi_ok():
@@ -231,6 +240,16 @@ def record_start_attempt(name, kind):
     with startup_lock:
         stats = load_startup_stats_unlocked()
         entry = startup_entry_unlocked(stats, name)
+        entry["active"] = {"started_at": time.time(), "kind": kind}
+        save_startup_stats_unlocked(stats)
+
+
+def ensure_start_attempt(name, kind):
+    with startup_lock:
+        stats = load_startup_stats_unlocked()
+        entry = startup_entry_unlocked(stats, name)
+        if entry.get("active"):
+            return
         entry["active"] = {"started_at": time.time(), "kind": kind}
         save_startup_stats_unlocked(stats)
 
@@ -387,6 +406,8 @@ def set_runtime_seconds(name, seconds):
 def startup_status_for(name, status, api_ready):
     if api_ready:
         record_api_ready(name)
+    elif status == "running" and not latest_start_job_for(name):
+        ensure_start_attempt(name, "restart")
     elif status != "running" and not latest_start_job_for(name):
         clear_start_attempt(name)
 
@@ -528,6 +549,14 @@ def delete_config(name):
     cfg = load_config()
     cfg["containers"] = [c for c in cfg.get("containers", []) if c.get("name") != name]
     save_config(cfg)
+
+
+def sync_container_restart_policy(item):
+    name = item.get("name", "")
+    if not name or not container_exists(name):
+        return
+    policy = "unless-stopped" if item.get("autostart") else "no"
+    run(["docker", "update", "--restart", policy, name])
 
 
 def default_image(profile, machine=None):
@@ -1380,9 +1409,10 @@ def progress_from_text(text, allow_complete=False):
 
 def latest_start_job_for(name):
     with jobs_lock:
+        labels = {f"start {name}", f"autostart {name}"}
         matching = [
             job for job in jobs.values()
-            if job.get("label") == f"start {name}" and job.get("status") == "running"
+            if job.get("label") in labels and job.get("status") == "running"
         ]
         if not matching:
             return None
@@ -1570,6 +1600,35 @@ def system_status():
     }
 
 
+def autostart_configured_containers():
+    for attempt in range(60):
+        if docker_daemon_ready():
+            break
+        time.sleep(2)
+    else:
+        print("vLLM WebGUI autostart: Docker daemon not ready after 120s", flush=True)
+        return
+
+    for item in list_configured():
+        if not item.get("autostart"):
+            continue
+        name = item["name"]
+        try:
+            if container_exists(name):
+                run(["docker", "update", "--restart", "unless-stopped", name])
+            if not container_exists(name) or not container_running(name):
+                start_background(f"autostart {name}", job_start_container, name)
+            elif not api_status_ready(item):
+                ensure_start_attempt(name, "restart")
+        except Exception as exc:
+            print(f"vLLM WebGUI autostart failed for {name}: {exc}", flush=True)
+
+
+def start_autostart_reconciler():
+    thread = threading.Thread(target=autostart_configured_containers, daemon=True)
+    thread.start()
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
@@ -1634,6 +1693,7 @@ class Handler(SimpleHTTPRequestHandler):
                 rename_startup_stats(old_name, item["name"])
                 removed_cache = cleanup_stale_hf_cache(item)
                 upsert_config(item)
+                sync_container_restart_policy(item)
                 self.send_json({
                     "ok": True,
                     "container": {k: v for k, v in item.items() if k != "hf_token"},
@@ -1696,6 +1756,7 @@ def main():
     HF_CACHE_BASE.mkdir(parents=True, exist_ok=True)
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
     server = ThreadingHTTPServer((HOST, PORT), Handler)
+    start_autostart_reconciler()
     print(f"vLLM WebGUI listening on http://{HOST}:{PORT}/", flush=True)
     server.serve_forever()
 

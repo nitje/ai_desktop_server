@@ -34,10 +34,30 @@ const containerLimitInput = document.getElementById("containerLimitInput");
 const modelSizeWarnReserveInput = document.getElementById("modelSizeWarnReserveInput");
 const containerSortInput = document.getElementById("containerSortInput");
 const containerSortDirectionInput = document.getElementById("containerSortDirectionInput");
+const showThroughputInput = document.getElementById("showThroughputInput");
 const showOverviewCard = document.getElementById("showOverviewCard");
 const showSystemCard = document.getElementById("showSystemCard");
 const showFormCard = document.getElementById("showFormCard");
 const showLogsCard = document.getElementById("showLogsCard");
+const ntfyEnabledInput = document.getElementById("ntfyEnabledInput");
+const ntfyServerInput = document.getElementById("ntfyServerInput");
+const ntfyTopicInput = document.getElementById("ntfyTopicInput");
+const ntfyTokenInput = document.getElementById("ntfyTokenInput");
+const ntfyTestBtn = document.getElementById("ntfyTestBtn");
+const telegramEnabledInput = document.getElementById("telegramEnabledInput");
+const telegramBotTokenInput = document.getElementById("telegramBotTokenInput");
+const telegramChatIdInput = document.getElementById("telegramChatIdInput");
+const telegramTestBtn = document.getElementById("telegramTestBtn");
+const emailEnabledInput = document.getElementById("emailEnabledInput");
+const emailSmtpHostInput = document.getElementById("emailSmtpHostInput");
+const emailSmtpPortInput = document.getElementById("emailSmtpPortInput");
+const emailUsernameInput = document.getElementById("emailUsernameInput");
+const emailPasswordInput = document.getElementById("emailPasswordInput");
+const emailFromInput = document.getElementById("emailFromInput");
+const emailToInput = document.getElementById("emailToInput");
+const emailTlsInput = document.getElementById("emailTlsInput");
+const emailSslInput = document.getElementById("emailSslInput");
+const emailTestBtn = document.getElementById("emailTestBtn");
 const containerLimitControls = document.getElementById("containerLimitControls");
 const containerLimitSummary = document.getElementById("containerLimitSummary");
 const containerLimitToggleBtn = document.getElementById("containerLimitToggleBtn");
@@ -84,6 +104,13 @@ const defaultViewSettings = {
   vramSizeUnit: "GB",
   diskSizeUnit: "GB",
   systemTempUnit: "C",
+  showThroughput: true,
+};
+
+const defaultNotificationSettings = {
+  ntfy: {enabled: false, server: "https://ntfy.sh", topic: "", token: "", monitors: defaultMonitorSettings()},
+  email: {enabled: false, smtp_host: "", smtp_port: 587, username: "", password: "", from_addr: "", to_addr: "", use_tls: true, use_ssl: false, monitors: defaultMonitorSettings()},
+  telegram: {enabled: false, bot_token: "", chat_id: "", monitors: defaultMonitorSettings()},
 };
 
 const defaultUiSettings = {
@@ -92,6 +119,7 @@ const defaultUiSettings = {
   poll: defaultPollSettings,
   cards: defaultCardSettings,
   view: defaultViewSettings,
+  notifications: defaultNotificationSettings,
   selected_disks: null,
 };
 
@@ -312,6 +340,13 @@ function runtimeLine(name, status = {}) {
   return `<small class="runtime-line" title="${escapeHtml(title)}">${escapeHtml(text)}</small>`;
 }
 
+function throughputLine(status = {}) {
+  const viewSettings = readViewSettings();
+  if (!viewSettings.showThroughput || !status.label) return "";
+  const title = status.title || "Avg prompt throughput / Avg generation throughput";
+  return `<small class="throughput-line" title="${escapeHtml(title)}">${escapeHtml(status.label)}</small>`;
+}
+
 function formatNumber(value, digits = 0) {
   return Number(value || 0).toLocaleString("de-DE", {
     maximumFractionDigits: digits,
@@ -361,6 +396,89 @@ function diskLabel(disk) {
   return `${disk.source || "Disk"} ${disk.mount || ""}`.trim();
 }
 
+function defaultMonitorSettings() {
+  return {
+    error: {enabled: true},
+    start: {enabled: false},
+    stop: {enabled: false},
+    notify_toggle: {enabled: false},
+    temp: {enabled: false, limit: 90},
+    vram: {enabled: false, limit: 97},
+    ram: {enabled: false, limit: 90},
+    disks: {},
+  };
+}
+
+function normalizeLimit(value, fallback, min = 1, max = 100) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(number)));
+}
+
+function normalizeMonitorSettings(settings = {}) {
+  const defaults = defaultMonitorSettings();
+  const disks = settings.disks || {};
+  const normalizedDisks = {};
+  Object.entries(disks).forEach(([key, value]) => {
+    normalizedDisks[key] = {
+      enabled: !!value?.enabled,
+      limit: normalizeLimit(value?.limit, 90, 1, 100),
+    };
+  });
+  return {
+    error: {enabled: settings.error?.enabled !== false},
+    start: {enabled: !!settings.start?.enabled},
+    stop: {enabled: !!settings.stop?.enabled},
+    notify_toggle: {enabled: !!settings.notify_toggle?.enabled},
+    temp: {
+      enabled: !!settings.temp?.enabled,
+      limit: normalizeLimit(settings.temp?.limit, defaults.temp.limit, 1, 120),
+    },
+    vram: {
+      enabled: !!settings.vram?.enabled,
+      limit: normalizeLimit(settings.vram?.limit, defaults.vram.limit, 1, 100),
+    },
+    ram: {
+      enabled: !!settings.ram?.enabled,
+      limit: normalizeLimit(settings.ram?.limit, defaults.ram.limit, 1, 100),
+    },
+    disks: normalizedDisks,
+  };
+}
+
+function normalizeNotificationSettings(settings = {}) {
+  const ntfy = settings.ntfy || {};
+  const email = settings.email || {};
+  const telegram = settings.telegram || {};
+  return {
+    ntfy: {
+      enabled: !!ntfy.enabled,
+      server: String(ntfy.server || defaultNotificationSettings.ntfy.server),
+      topic: String(ntfy.topic || ""),
+      token: String(ntfy.token || ""),
+      monitors: normalizeMonitorSettings(ntfy.monitors || {}),
+    },
+    email: {
+      enabled: !!email.enabled,
+      smtp_host: String(email.smtp_host || ""),
+      smtp_port: Math.max(1, Number(email.smtp_port) || defaultNotificationSettings.email.smtp_port),
+      username: String(email.username || ""),
+      password: String(email.password || ""),
+      from_addr: String(email.from_addr || ""),
+      to_addr: String(email.to_addr || ""),
+      use_tls: !!email.use_tls && !email.use_ssl,
+      use_ssl: !!email.use_ssl,
+      monitors: normalizeMonitorSettings(email.monitors || {}),
+    },
+    telegram: {
+      enabled: !!telegram.enabled,
+      bot_token: String(telegram.bot_token || ""),
+      chat_id: String(telegram.chat_id || ""),
+      monitors: normalizeMonitorSettings(telegram.monitors || {}),
+    },
+  };
+}
+
 function normalizeUiSettings(settings = {}) {
   const poll = settings.poll || {};
   const cards = settings.cards || {};
@@ -403,7 +521,9 @@ function normalizeUiSettings(settings = {}) {
       vramSizeUnit,
       diskSizeUnit,
       systemTempUnit,
+      showThroughput: view.showThroughput !== false,
     },
+    notifications: normalizeNotificationSettings(settings.notifications || {}),
     selected_disks: Array.isArray(settings.selected_disks) ? [...new Set(settings.selected_disks)] : null,
   };
 }
@@ -485,9 +605,119 @@ function saveViewSettings(settings) {
     vramSizeUnit: sizeUnits.has(settings.vramSizeUnit) ? settings.vramSizeUnit : current.vramSizeUnit,
     diskSizeUnit: sizeUnits.has(settings.diskSizeUnit) ? settings.diskSizeUnit : current.diskSizeUnit,
     systemTempUnit: tempUnits.has(settings.systemTempUnit) ? settings.systemTempUnit : current.systemTempUnit,
+    showThroughput: settings.showThroughput !== false,
   };
   uiSettings.view = cleaned;
   return cleaned;
+}
+
+function readNotificationSettings() {
+  return normalizeNotificationSettings(uiSettings.notifications || defaultNotificationSettings);
+}
+
+function notificationSettingsFromForm() {
+  return normalizeNotificationSettings({
+    ntfy: {
+      enabled: ntfyEnabledInput.checked,
+      server: ntfyServerInput.value,
+      topic: ntfyTopicInput.value,
+      token: ntfyTokenInput.value,
+      monitors: collectMonitorSettings("ntfy"),
+    },
+    email: {
+      enabled: emailEnabledInput.checked,
+      smtp_host: emailSmtpHostInput.value,
+      smtp_port: emailSmtpPortInput.value,
+      username: emailUsernameInput.value,
+      password: emailPasswordInput.value,
+      from_addr: emailFromInput.value,
+      to_addr: emailToInput.value,
+      use_tls: emailTlsInput.checked,
+      use_ssl: emailSslInput.checked,
+      monitors: collectMonitorSettings("email"),
+    },
+    telegram: {
+      enabled: telegramEnabledInput.checked,
+      bot_token: telegramBotTokenInput.value,
+      chat_id: telegramChatIdInput.value,
+      monitors: collectMonitorSettings("telegram"),
+    },
+  });
+}
+
+function saveNotificationSettings(settings) {
+  const cleaned = normalizeNotificationSettings(settings);
+  uiSettings.notifications = cleaned;
+  return cleaned;
+}
+
+function activeDisplayedDisks() {
+  const disks = state?.system?.disks || [];
+  const availableKeys = disks.map(diskKey);
+  let activeKeys = Array.isArray(selectedDiskKeys) ? selectedDiskKeys.filter((key) => availableKeys.includes(key)) : [];
+  if (selectedDiskKeys === null && disks.length) activeKeys = [diskKey(disks[0])];
+  return disks.filter((disk) => activeKeys.includes(diskKey(disk)));
+}
+
+function monitorElement(type, attr, name) {
+  return document.querySelector(`[data-monitor-type="${type}"][${attr}="${name}"]`);
+}
+
+function fillMonitorSettings(type, monitors = defaultMonitorSettings()) {
+  ["error", "start", "stop", "notify_toggle", "temp", "vram", "ram"].forEach((name) => {
+    const enabled = monitorElement(type, "data-monitor-enabled", name);
+    if (enabled) enabled.checked = !!monitors[name]?.enabled;
+    const limit = monitorElement(type, "data-monitor-limit", name);
+    if (limit) limit.value = monitors[name]?.limit ?? defaultMonitorSettings()[name]?.limit ?? 90;
+  });
+}
+
+function collectMonitorSettings(type) {
+  const current = defaultMonitorSettings();
+  ["error", "start", "stop", "notify_toggle", "temp", "vram", "ram"].forEach((name) => {
+    const enabled = monitorElement(type, "data-monitor-enabled", name);
+    const limit = monitorElement(type, "data-monitor-limit", name);
+    current[name] = {
+      enabled: !!enabled?.checked,
+      ...(limit ? {limit: limit.value} : {}),
+    };
+  });
+  current.disks = {};
+  document.querySelectorAll(`[data-monitor-type="${type}"][data-monitor-disk-enabled]`).forEach((checkbox) => {
+    const key = checkbox.dataset.diskKey || "";
+    const limit = [...document.querySelectorAll(`[data-monitor-type="${type}"][data-monitor-disk-limit]`)]
+      .find((input) => input.dataset.diskKey === key);
+    current.disks[key] = {
+      enabled: checkbox.checked,
+      limit: limit?.value || 90,
+    };
+  });
+  return normalizeMonitorSettings(current);
+}
+
+function renderNotificationDiskLimits(notificationSettings = readNotificationSettings()) {
+  const disks = activeDisplayedDisks();
+  ["ntfy", "telegram", "email"].forEach((type) => {
+    const target = document.getElementById(`${type}DiskLimits`);
+    if (!target) return;
+    const monitors = notificationSettings[type]?.monitors || defaultMonitorSettings();
+    if (!disks.length) {
+      target.innerHTML = `<small>Keine HDD auf der Hauptseite angezeigt.</small>`;
+      return;
+    }
+    target.innerHTML = disks.map((disk, index) => {
+      const key = diskKey(disk);
+      const cfg = monitors.disks?.[key] || {enabled: false, limit: 90};
+      const label = `HDD${index + 1}`;
+      return `
+        <label class="monitor-row">
+          <span><input data-monitor-type="${type}" data-monitor-disk-enabled data-disk-key="${escapeHtml(key)}" type="checkbox" ${cfg.enabled ? "checked" : ""}> ${label} &gt;</span>
+          <input data-monitor-type="${type}" data-monitor-disk-limit data-disk-key="${escapeHtml(key)}" type="number" min="1" max="100" step="1" value="${escapeHtml(cfg.limit ?? 90)}">
+          <span>%</span>
+        </label>
+      `;
+    }).join("");
+  });
 }
 
 function applyCardVisibility(settings = readCardSettings()) {
@@ -649,6 +879,7 @@ async function toggleSystemMetric(kind) {
 function fillSettingsForm(settings = readPollSettings()) {
   const cardSettings = readCardSettings();
   const viewSettings = readViewSettings();
+  const notificationSettings = readNotificationSettings();
   designSelect.value = uiSettings.design || defaultUiSettings.design;
   overviewIntervalInput.value = settings.overview;
   systemIntervalInput.value = settings.system;
@@ -658,10 +889,48 @@ function fillSettingsForm(settings = readPollSettings()) {
   modelSizeWarnReserveInput.value = viewSettings.modelSizeWarnReserveGb;
   containerSortInput.value = viewSettings.containerSort;
   containerSortDirectionInput.value = viewSettings.containerSortDirection;
+  showThroughputInput.checked = viewSettings.showThroughput !== false;
   showOverviewCard.checked = cardSettings.overview;
   showSystemCard.checked = cardSettings.system;
   showFormCard.checked = cardSettings.form;
   showLogsCard.checked = cardSettings.logs;
+  renderNotificationDiskLimits(notificationSettings);
+  fillMonitorSettings("ntfy", notificationSettings.ntfy.monitors);
+  fillMonitorSettings("telegram", notificationSettings.telegram.monitors);
+  fillMonitorSettings("email", notificationSettings.email.monitors);
+  ntfyEnabledInput.checked = notificationSettings.ntfy.enabled;
+  ntfyServerInput.value = notificationSettings.ntfy.server;
+  ntfyTopicInput.value = notificationSettings.ntfy.topic;
+  ntfyTokenInput.value = notificationSettings.ntfy.token;
+  telegramEnabledInput.checked = notificationSettings.telegram.enabled;
+  telegramBotTokenInput.value = notificationSettings.telegram.bot_token;
+  telegramChatIdInput.value = notificationSettings.telegram.chat_id;
+  emailEnabledInput.checked = notificationSettings.email.enabled;
+  emailSmtpHostInput.value = notificationSettings.email.smtp_host;
+  emailSmtpPortInput.value = notificationSettings.email.smtp_port;
+  emailUsernameInput.value = notificationSettings.email.username;
+  emailPasswordInput.value = notificationSettings.email.password;
+  emailFromInput.value = notificationSettings.email.from_addr;
+  emailToInput.value = notificationSettings.email.to_addr;
+  emailTlsInput.checked = notificationSettings.email.use_tls;
+  emailSslInput.checked = notificationSettings.email.use_ssl;
+}
+
+function setEmailSecurityMode(mode) {
+  if (mode === "ssl") {
+    emailSslInput.checked = true;
+    emailTlsInput.checked = false;
+    emailSmtpPortInput.value = 465;
+    return;
+  }
+  if (mode === "starttls") {
+    emailTlsInput.checked = true;
+    emailSslInput.checked = false;
+    emailSmtpPortInput.value = 587;
+    return;
+  }
+  emailTlsInput.checked = false;
+  emailSslInput.checked = false;
 }
 
 function openSettingsModal() {
@@ -692,7 +961,9 @@ async function applySettings() {
     modelSizeWarnReserveGb: modelSizeWarnReserveInput.value,
     containerSort: containerSortInput.value,
     containerSortDirection: containerSortDirectionInput.value,
+    showThroughput: showThroughputInput.checked,
   });
+  saveNotificationSettings(notificationSettingsFromForm());
   showAllContainers = false;
   renderRows();
   await persistUiSettings();
@@ -700,11 +971,33 @@ async function applySettings() {
   closeSettingsModal();
 }
 
+async function testNotification(type, button) {
+  const oldText = button.textContent;
+  button.disabled = true;
+  button.textContent = "Teste...";
+  try {
+    await api("/api/notifications/test", {
+      method: "POST",
+      body: JSON.stringify({type, notifications: notificationSettingsFromForm()}),
+    });
+    button.textContent = "OK";
+    window.setTimeout(() => {
+      button.textContent = oldText;
+      button.disabled = false;
+    }, 1200);
+  } catch (error) {
+    alert(error.message);
+    button.textContent = oldText;
+    button.disabled = false;
+  }
+}
+
 async function resetSettings() {
   const settings = savePollSettings(defaultPollSettings);
   applyDesign(defaultUiSettings.design);
   applyCardVisibility(saveCardSettings(defaultCardSettings));
   saveViewSettings(defaultViewSettings);
+  saveNotificationSettings(defaultNotificationSettings);
   showAllContainers = false;
   renderRows();
   await persistUiSettings();
@@ -791,7 +1084,7 @@ async function refreshOverview() {
   const data = await api("/api/overview");
   state = {...(state || {}), ...data};
   const version = escapeHtml(state.runner_version || "local");
-  statusLine.innerHTML = `Version 0.55 - Hotfix: ${version} | &copy; 2026 <a href="https://interceptor.marconitschke.de/thread-157.html" target="_blank" rel="noopener noreferrer">Marco Nitschke</a> | <a href="https://hub.docker.com/u/nitje" target="_blank" rel="noopener noreferrer">DockerHub</a> | <a href="https://github.com/nitje" target="_blank" rel="noopener noreferrer">GitHub</a> | <a href="https://github.com/vllm-project/vllm" target="_blank" rel="noopener noreferrer">vLLM Projekt</a>`;
+  statusLine.innerHTML = `Version 0.56 - Hotfix: ${version} | &copy; 2026 <a href="https://interceptor.marconitschke.de/thread-157.html" target="_blank" rel="noopener noreferrer">Marco Nitschke</a> | <a href="https://hub.docker.com/u/nitje" target="_blank" rel="noopener noreferrer">DockerHub</a> | <a href="https://github.com/nitje" target="_blank" rel="noopener noreferrer">GitHub</a> | <a href="https://github.com/vllm-project/vllm" target="_blank" rel="noopener noreferrer">vLLM Projekt</a>`;
   renderNvidiaStatus();
 }
 
@@ -905,6 +1198,8 @@ function containerSearchText(container) {
     container.startup_status?.text,
     container.runtime_status?.text,
     container.runtime_total_text,
+    container.throughput_status?.label,
+    container.throughput_status?.title,
     container.diagnostic,
   ].map((value) => String(value ?? "").toLowerCase()).join(" ");
 }
@@ -967,9 +1262,16 @@ function renderRows() {
     const modelCell = c.model_format === "gguf"
       ? `${escapeHtml(c.model)}<br><small>GGUF: ${renderGgufSource(c)}</small>${modelSizeLine(c)}`
       : `${escapeHtml(c.model)}${hfLink(c.model)}${modelSizeLine(c)}`;
+    const startStopAction = c.status === "running" ? "stop" : "start";
+    const startStopLabel = c.status === "running" ? "Stop" : "Start";
+    const startStopClass = c.status === "running" ? "secondary" : "";
+    const notifyEnabled = !!c.notify;
+    const notifyDisabled = !c.notifications_available;
+    const notifyClass = notifyEnabled ? "notify-enabled" : "secondary";
+    const notifyTitle = notifyDisabled ? "Erst Benachrichtigungen in den Einstellungen einrichten" : (notifyEnabled ? "Benachrichtigung deaktivieren" : "Benachrichtigung aktivieren");
     return `
     <tr>
-      <td><strong>${escapeHtml(c.name)}</strong><br>${runtimeLine(c.name, c.runtime_status)}</td>
+      <td><strong>${escapeHtml(c.name)}</strong><br>${runtimeLine(c.name, c.runtime_status)}${throughputLine(c.throughput_status)}</td>
       <td>${badge(c.status, c.status)}${c.config_current ? "" : "<br><small>Config geaendert</small>"}</td>
       <td class="api-status-cell">
         <div class="api-status-block">
@@ -987,8 +1289,8 @@ function renderRows() {
       <td>
         <div class="actions">
           <button data-act="edit" data-name="${escapeHtml(c.name)}" class="secondary">Bearbeiten</button>
-          <button data-act="start" data-name="${escapeHtml(c.name)}">Start</button>
-          <button data-act="stop" data-name="${escapeHtml(c.name)}" class="secondary">Stop</button>
+          <button data-act="${startStopAction}" data-name="${escapeHtml(c.name)}" class="${startStopClass}">${startStopLabel}</button>
+          <button data-act="notify" data-name="${escapeHtml(c.name)}" class="${notifyClass}" title="${escapeHtml(notifyTitle)}" ${notifyDisabled ? "disabled" : ""}>NTFY</button>
           <button data-act="unload" data-name="${escapeHtml(c.name)}" class="secondary">Unload VRAM</button>
           <button data-act="logs" data-name="${escapeHtml(c.name)}" class="secondary">Logs</button>
           <button data-act="cache" data-name="${escapeHtml(c.name)}" class="danger">HF Cache</button>
@@ -1096,6 +1398,14 @@ rows.addEventListener("click", async (event) => {
       await startJob("start", name);
     } else if (action === "stop") {
       await startJob("stop", name);
+    } else if (action === "notify") {
+      const data = await api(`/api/containers/${encodeURIComponent(name)}/notify`, {
+        method: "POST",
+        body: JSON.stringify({enabled: !(item?.notify)}),
+      });
+      if (item) item.notify = data.notify;
+      await refreshContainers();
+      return;
     } else if (action === "unload") {
       await startJob("unload", name);
     } else if (action === "logs") {
@@ -1155,6 +1465,11 @@ settingsModalSaveBtn.addEventListener("click", applySettings);
 settingsModalResetBtn.addEventListener("click", resetSettings);
 settingsModalCancelBtn.addEventListener("click", closeSettingsModal);
 settingsModalCloseBtn.addEventListener("click", closeSettingsModal);
+ntfyTestBtn.addEventListener("click", () => testNotification("ntfy", ntfyTestBtn));
+emailTestBtn.addEventListener("click", () => testNotification("email", emailTestBtn));
+telegramTestBtn.addEventListener("click", () => testNotification("telegram", telegramTestBtn));
+emailTlsInput.addEventListener("change", () => setEmailSecurityMode(emailTlsInput.checked ? "starttls" : "none"));
+emailSslInput.addEventListener("change", () => setEmailSecurityMode(emailSslInput.checked ? "ssl" : "none"));
 settingsModal.addEventListener("click", (event) => {
   if (event.target.dataset.closeModal === "settings") closeSettingsModal();
 });

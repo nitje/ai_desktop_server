@@ -5,13 +5,16 @@ import os
 import re
 import shlex
 import shutil
+import smtplib
 import socket
+import ssl
 import subprocess
 import threading
 import time
 import urllib.parse
 import urllib.request
 import uuid
+from email.message import EmailMessage
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -26,6 +29,7 @@ STARTUP_STATS_FILE = Path(os.environ.get("VLLM_WEBGUI_STARTUP_STATS", str(BASE_D
 UI_SETTINGS_FILE = Path(os.environ.get("VLLM_WEBGUI_UI_SETTINGS", str(BASE_DIR / "ui_settings.json")))
 HOST = os.environ.get("VLLM_WEBGUI_HOST", "0.0.0.0")
 PORT = int(os.environ.get("VLLM_WEBGUI_PORT", "18000"))
+START_NOTIFICATION_API_TIMEOUT = int(os.environ.get("VLLM_WEBGUI_START_NOTIFY_TIMEOUT", "1800"))
 
 DEFAULT_IMAGE = "vllm/vllm-openai:latest"
 DEFAULT_MODEL = "Qwen/Qwen3-0.6B"
@@ -34,6 +38,11 @@ NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,63}$")
 PERCENT_RE = re.compile(r"(?<!\d)(100|[0-9]{1,2})(?:\.\d+)?%")
 SIZE_RE = re.compile(r"([0-9]+(?:\.[0-9]+)?)\s*([KMGT]?i?B)\s*/\s*([0-9]+(?:\.[0-9]+)?)\s*([KMGT]?i?B)", re.IGNORECASE)
 SPLIT_GGUF_RE = re.compile(r"^(?P<prefix>.+-)(?P<index>\d+)-of-(?P<total>\d+)(?P<suffix>\.gguf)$", re.IGNORECASE)
+THROUGHPUT_RE = re.compile(
+    r"Avg prompt throughput:\s*([0-9]+(?:\.[0-9]+)?)\s*tokens/s,\s*"
+    r"Avg generation throughput:\s*([0-9]+(?:\.[0-9]+)?)\s*tokens/s",
+    re.IGNORECASE,
+)
 
 jobs = {}
 jobs_lock = threading.Lock()
@@ -41,7 +50,11 @@ config_lock = threading.Lock()
 startup_lock = threading.Lock()
 ui_settings_lock = threading.Lock()
 cpu_lock = threading.Lock()
+notification_lock = threading.Lock()
 last_cpu_sample = None
+notification_state = {}
+expected_stop_until = {}
+system_alert_state = {}
 
 DEFAULT_UI_SETTINGS = {
     "theme": "dark",
@@ -67,6 +80,31 @@ DEFAULT_UI_SETTINGS = {
         "vramSizeUnit": "GB",
         "diskSizeUnit": "GB",
         "systemTempUnit": "C",
+        "showThroughput": True,
+    },
+    "notifications": {
+        "ntfy": {
+            "enabled": False,
+            "server": "https://ntfy.sh",
+            "topic": "",
+            "token": "",
+        },
+        "email": {
+            "enabled": False,
+            "smtp_host": "",
+            "smtp_port": 587,
+            "username": "",
+            "password": "",
+            "from_addr": "",
+            "to_addr": "",
+            "use_tls": True,
+            "use_ssl": False,
+        },
+        "telegram": {
+            "enabled": False,
+            "bot_token": "",
+            "chat_id": "",
+        },
     },
     "selected_disks": None,
 }
@@ -131,6 +169,85 @@ def ui_int(value, default, minimum):
         return default
 
 
+def monitor_limit(value, default, minimum=0, maximum=100):
+    try:
+        return max(minimum, min(maximum, int(value)))
+    except (TypeError, ValueError):
+        return default
+
+
+def normalize_notification_monitors(data):
+    data = data if isinstance(data, dict) else {}
+    disks = data.get("disks") if isinstance(data.get("disks"), dict) else {}
+    error = data.get("error") if isinstance(data.get("error"), dict) else {}
+    cleaned_disks = {}
+    for key, value in disks.items():
+        value = value if isinstance(value, dict) else {}
+        cleaned_disks[str(key)] = {
+            "enabled": bool(value.get("enabled", False)),
+            "limit": monitor_limit(value.get("limit"), 90, 1, 100),
+        }
+    return {
+        "error": {"enabled": error.get("enabled", True) is not False},
+        "start": {
+            "enabled": bool(data.get("start", {}).get("enabled", False)) if isinstance(data.get("start"), dict) else False,
+        },
+        "stop": {
+            "enabled": bool(data.get("stop", {}).get("enabled", False)) if isinstance(data.get("stop"), dict) else False,
+        },
+        "notify_toggle": {
+            "enabled": bool(data.get("notify_toggle", {}).get("enabled", False)) if isinstance(data.get("notify_toggle"), dict) else False,
+        },
+        "temp": {
+            "enabled": bool(data.get("temp", {}).get("enabled", False)) if isinstance(data.get("temp"), dict) else False,
+            "limit": monitor_limit(data.get("temp", {}).get("limit") if isinstance(data.get("temp"), dict) else None, 90, 1, 120),
+        },
+        "vram": {
+            "enabled": bool(data.get("vram", {}).get("enabled", False)) if isinstance(data.get("vram"), dict) else False,
+            "limit": monitor_limit(data.get("vram", {}).get("limit") if isinstance(data.get("vram"), dict) else None, 97, 1, 100),
+        },
+        "ram": {
+            "enabled": bool(data.get("ram", {}).get("enabled", False)) if isinstance(data.get("ram"), dict) else False,
+            "limit": monitor_limit(data.get("ram", {}).get("limit") if isinstance(data.get("ram"), dict) else None, 90, 1, 100),
+        },
+        "disks": cleaned_disks,
+    }
+
+
+def normalize_notifications(data):
+    data = data if isinstance(data, dict) else {}
+    ntfy = data.get("ntfy") if isinstance(data.get("ntfy"), dict) else {}
+    email = data.get("email") if isinstance(data.get("email"), dict) else {}
+    telegram = data.get("telegram") if isinstance(data.get("telegram"), dict) else {}
+    return {
+        "ntfy": {
+            "enabled": bool(ntfy.get("enabled", DEFAULT_UI_SETTINGS["notifications"]["ntfy"]["enabled"])),
+            "server": str(ntfy.get("server", DEFAULT_UI_SETTINGS["notifications"]["ntfy"]["server"]) or "").strip(),
+            "topic": str(ntfy.get("topic", "") or "").strip(),
+            "token": str(ntfy.get("token", "") or ""),
+            "monitors": normalize_notification_monitors(ntfy.get("monitors")),
+        },
+        "email": {
+            "enabled": bool(email.get("enabled", DEFAULT_UI_SETTINGS["notifications"]["email"]["enabled"])),
+            "smtp_host": str(email.get("smtp_host", "") or "").strip(),
+            "smtp_port": ui_int(email.get("smtp_port"), DEFAULT_UI_SETTINGS["notifications"]["email"]["smtp_port"], 1),
+            "username": str(email.get("username", "") or "").strip(),
+            "password": str(email.get("password", "") or ""),
+            "from_addr": str(email.get("from_addr", "") or "").strip(),
+            "to_addr": str(email.get("to_addr", "") or "").strip(),
+            "use_tls": bool(email.get("use_tls", DEFAULT_UI_SETTINGS["notifications"]["email"]["use_tls"])) and not bool(email.get("use_ssl", False)),
+            "use_ssl": bool(email.get("use_ssl", DEFAULT_UI_SETTINGS["notifications"]["email"]["use_ssl"])),
+            "monitors": normalize_notification_monitors(email.get("monitors")),
+        },
+        "telegram": {
+            "enabled": bool(telegram.get("enabled", DEFAULT_UI_SETTINGS["notifications"]["telegram"]["enabled"])),
+            "bot_token": str(telegram.get("bot_token", "") or "").strip(),
+            "chat_id": str(telegram.get("chat_id", "") or "").strip(),
+            "monitors": normalize_notification_monitors(telegram.get("monitors")),
+        },
+    }
+
+
 def normalize_ui_settings(data):
     data = data if isinstance(data, dict) else {}
     poll = data.get("poll") if isinstance(data.get("poll"), dict) else {}
@@ -176,7 +293,9 @@ def normalize_ui_settings(data):
             "vramSizeUnit": vram_size_unit if vram_size_unit in size_units else DEFAULT_UI_SETTINGS["view"]["vramSizeUnit"],
             "diskSizeUnit": disk_size_unit if disk_size_unit in size_units else DEFAULT_UI_SETTINGS["view"]["diskSizeUnit"],
             "systemTempUnit": system_temp_unit if system_temp_unit in temp_units else DEFAULT_UI_SETTINGS["view"]["systemTempUnit"],
+            "showThroughput": view.get("showThroughput", DEFAULT_UI_SETTINGS["view"]["showThroughput"]) is not False,
         },
+        "notifications": normalize_notifications(data.get("notifications")),
         "selected_disks": selected_disks,
     }
 
@@ -198,6 +317,229 @@ def save_ui_settings(settings):
         UI_SETTINGS_FILE.write_text(json.dumps(cleaned, indent=2, sort_keys=True), encoding="utf-8")
         os.chmod(UI_SETTINGS_FILE, 0o600)
     return cleaned
+
+
+def notification_configured(kind, settings=None):
+    notifications = (settings or load_ui_settings()).get("notifications", {})
+    if kind == "ntfy":
+        cfg = notifications.get("ntfy", {})
+        return bool(cfg.get("enabled") and cfg.get("server") and cfg.get("topic"))
+    if kind == "email":
+        cfg = notifications.get("email", {})
+        return bool(cfg.get("enabled") and cfg.get("smtp_host") and cfg.get("from_addr") and cfg.get("to_addr"))
+    if kind == "telegram":
+        cfg = notifications.get("telegram", {})
+        return bool(cfg.get("enabled") and cfg.get("bot_token") and cfg.get("chat_id"))
+    return False
+
+
+def notifications_available(settings=None):
+    return any(notification_configured(kind, settings) for kind in ("ntfy", "email", "telegram"))
+
+
+def notification_monitor_enabled(cfg, monitor_type="error", disk_key=None):
+    monitors = cfg.get("monitors") if isinstance(cfg.get("monitors"), dict) else normalize_notification_monitors({})
+    if monitor_type == "disk":
+        disks = monitors.get("disks") if isinstance(monitors.get("disks"), dict) else {}
+        disk_cfg = disks.get(disk_key, {}) if disk_key else {}
+        return bool(isinstance(disk_cfg, dict) and disk_cfg.get("enabled", False))
+    monitor = monitors.get(monitor_type, {})
+    return bool(isinstance(monitor, dict) and monitor.get("enabled", False))
+
+
+def send_ntfy(cfg, title, message):
+    server = str(cfg.get("server", "")).strip().rstrip("/")
+    topic = urllib.parse.quote(str(cfg.get("topic", "")).strip().strip("/"), safe="")
+    if not server or not topic:
+        raise RuntimeError("NTFY braucht Server und Topic")
+    req = urllib.request.Request(f"{server}/{topic}", data=message.encode("utf-8"), method="POST")
+    req.add_header("Title", title)
+    req.add_header("Priority", "high")
+    token = str(cfg.get("token", "") or "")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    with urllib.request.urlopen(req, timeout=12) as res:
+        if res.status >= 400:
+            raise RuntimeError(f"NTFY Fehler: HTTP {res.status}")
+
+
+def send_email(cfg, title, message):
+    host = str(cfg.get("smtp_host", "")).strip()
+    port = int(cfg.get("smtp_port", 587) or 587)
+    from_addr = str(cfg.get("from_addr", "")).strip()
+    to_addr = str(cfg.get("to_addr", "")).strip()
+    if not host or not from_addr or not to_addr:
+        raise RuntimeError("eMail braucht SMTP Host, Absender und Empfaenger")
+    mail = EmailMessage()
+    mail["Subject"] = title
+    mail["From"] = from_addr
+    mail["To"] = to_addr
+    mail.set_content(message)
+    if cfg.get("use_ssl", False):
+        with smtplib.SMTP_SSL(host, port, timeout=15, context=ssl.create_default_context()) as smtp:
+            if cfg.get("username"):
+                smtp.login(cfg.get("username"), cfg.get("password", ""))
+            smtp.send_message(mail)
+    elif cfg.get("use_tls", True):
+        with smtplib.SMTP(host, port, timeout=15) as smtp:
+            smtp.starttls(context=ssl.create_default_context())
+            if cfg.get("username"):
+                smtp.login(cfg.get("username"), cfg.get("password", ""))
+            smtp.send_message(mail)
+    else:
+        with smtplib.SMTP(host, port, timeout=15) as smtp:
+            if cfg.get("username"):
+                smtp.login(cfg.get("username"), cfg.get("password", ""))
+            smtp.send_message(mail)
+
+
+def send_telegram(cfg, title, message):
+    token = str(cfg.get("bot_token", "")).strip()
+    chat_id = str(cfg.get("chat_id", "")).strip()
+    if not token or not chat_id:
+        raise RuntimeError("Telegram braucht Bot Token und Chat ID")
+    payload = urllib.parse.urlencode({
+        "chat_id": chat_id,
+        "text": f"{title}\n\n{message}",
+    }).encode("utf-8")
+    req = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage", data=payload, method="POST")
+    with urllib.request.urlopen(req, timeout=12) as res:
+        if res.status >= 400:
+            raise RuntimeError(f"Telegram Fehler: HTTP {res.status}")
+
+
+def send_notification(kind, cfg, title, message):
+    if kind == "ntfy":
+        send_ntfy(cfg, title, message)
+    elif kind == "email":
+        send_email(cfg, title, message)
+    elif kind == "telegram":
+        send_telegram(cfg, title, message)
+    else:
+        raise RuntimeError("Unbekannter Benachrichtigungs-Typ")
+
+
+def send_configured_notifications(title, message, settings=None, monitor_type="error", disk_key=None):
+    settings = settings or load_ui_settings()
+    notifications = settings.get("notifications", {})
+    errors = []
+    sent = []
+    for kind in ("ntfy", "email", "telegram"):
+        cfg = notifications.get(kind, {})
+        if not notification_configured(kind, settings) or not notification_monitor_enabled(cfg, monitor_type, disk_key):
+            continue
+        try:
+            send_notification(kind, cfg, title, message)
+            sent.append(kind)
+        except Exception as exc:
+            errors.append(f"{kind}: {exc}")
+    if errors and not sent:
+        raise RuntimeError("; ".join(errors))
+    return {"sent": sent, "errors": errors}
+
+
+def notification_message(name, reason, item=None):
+    lines = [
+        f"Container: {name}",
+        f"Fehler: {reason}",
+        f"Zeit: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+    ]
+    if item:
+        lines.append(f"Port: {item.get('port', '')}")
+        lines.append(f"Modell: {item.get('model', '')}")
+    return "\n".join(lines)
+
+
+def container_event_message(name, event, item=None, api_ready=False):
+    lines = [
+        f"Container: {name}",
+        f"Meldung: {event}",
+        f"Zeit: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+    ]
+    if item:
+        lines.append(f"Port: {item.get('port', '')}")
+        lines.append(f"Modell: {item.get('model', '')}")
+        if api_ready:
+            lines.append("API Status: API bereit")
+            lines.append(f"API URL: {api_base_url(item)}")
+            lines.append(f"Models URL: {api_models_url(item)}")
+    return "\n".join(lines)
+
+
+def notify_container_event(name, monitor_type, event, item=None, job_id=None, require_container_notify=True, api_ready=False):
+    if require_container_notify and not (item or {}).get("notify"):
+        return
+    try:
+        send_configured_notifications(
+            f"vLLM Container: {event}",
+            container_event_message(name, event, item, api_ready=api_ready),
+            monitor_type=monitor_type,
+        )
+    except Exception as exc:
+        message = f"Benachrichtigung fehlgeschlagen ({monitor_type}): {exc}"
+        if job_id:
+            append_job(job_id, message)
+        else:
+            print(f"vLLM WebGUI {message}", flush=True)
+
+
+def system_notification_message(label, value, limit, unit="%"):
+    return "\n".join([
+        f"Monitor: {label}",
+        f"Wert: {value}{unit}",
+        f"Limit: {limit}{unit}",
+        f"Zeit: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+    ])
+
+
+def disk_key(disk):
+    return f"{disk.get('source', '')}|{disk.get('mount', '')}"
+
+
+def displayed_disks(metrics, settings):
+    disks = metrics.get("disks", [])
+    selected = settings.get("selected_disks")
+    if selected is None:
+        return disks[:1]
+    selected_set = set(selected)
+    return [disk for disk in disks if disk_key(disk) in selected_set]
+
+
+def alert_transition_key(key, active):
+    with notification_lock:
+        previous = bool(system_alert_state.get(key, False))
+        if active:
+            if previous:
+                return False
+            system_alert_state[key] = True
+            return True
+        system_alert_state[key] = False
+        return False
+
+
+def notify_metric_if_needed(kind, cfg, metric_key, monitor_type, label, value, limit, unit="%", disk_key_value=None):
+    active = value is not None and float(value) > float(limit)
+    state_key = f"{kind}:{metric_key}:{disk_key_value or ''}"
+    should_send = alert_transition_key(state_key, active)
+    if not should_send:
+        return
+    title = f"vLLM Monitor: {label} > {limit}{unit}"
+    message = system_notification_message(label, value, limit, unit)
+    send_notification(kind, cfg, title, message)
+
+
+def mark_expected_stop(name, seconds=180):
+    with notification_lock:
+        expected_stop_until[name] = time.time() + seconds
+
+
+def expected_stop(name):
+    with notification_lock:
+        until = expected_stop_until.get(name, 0)
+        if until and until >= time.time():
+            return True
+        expected_stop_until.pop(name, None)
+        return False
 
 
 def load_startup_stats_unlocked():
@@ -554,6 +896,20 @@ def delete_config(name):
     save_config(cfg)
 
 
+def set_container_notify(name, enabled):
+    cfg = load_config()
+    found = False
+    for item in cfg.get("containers", []):
+        if item.get("name") == name:
+            item["notify"] = bool(enabled)
+            found = True
+            break
+    if not found:
+        raise RuntimeError("Container-Konfiguration nicht gefunden")
+    save_config(cfg)
+    return bool(enabled)
+
+
 def sync_container_restart_policy(item):
     name = item.get("name", "")
     if not name or not container_exists(name):
@@ -592,6 +948,7 @@ def validate_container(data, old_name=None):
         "extra_args": str(data.get("extra_args", "")),
         "docker_extra_args": str(data.get("docker_extra_args", "")),
         "autostart": bool(data.get("autostart", False)),
+        "notify": bool(data.get("notify", False)),
     }
     if not NAME_RE.match(item["name"]):
         raise ValueError("Container-Name: 2-64 Zeichen, erlaubt A-Z a-z 0-9 _ . -")
@@ -671,6 +1028,24 @@ def container_running(name):
         return False
     proc = run(["docker", "inspect", "-f", "{{.State.Running}}", name])
     return proc.returncode == 0 and proc.stdout.strip() == "true"
+
+
+def container_exit_summary(name):
+    if not docker_available() or not container_exists(name):
+        return "Container fehlt"
+    template = "{{.State.ExitCode}}|{{.State.OOMKilled}}|{{.State.Error}}|{{.State.FinishedAt}}"
+    proc = run(["docker", "inspect", "-f", template, name])
+    if proc.returncode != 0:
+        return "Container ist nicht erreichbar"
+    exit_code, oom, error, finished = (proc.stdout.strip().split("|") + ["", "", "", ""])[:4]
+    parts = [f"ExitCode={exit_code or 'unbekannt'}"]
+    if oom == "true":
+        parts.append("OOMKilled=true")
+    if error:
+        parts.append(f"Error={error}")
+    if finished and not finished.startswith("0001-"):
+        parts.append(f"FinishedAt={finished}")
+    return ", ".join(parts)
 
 
 def container_labels(name):
@@ -1151,6 +1526,45 @@ def stream_command(job_id, cmd):
         raise RuntimeError(f"Command failed ({rc}): {' '.join(cmd)}")
 
 
+def start_notification_enabled(item):
+    if not item.get("notify"):
+        return False
+    settings = load_ui_settings()
+    notifications = settings.get("notifications", {})
+    for kind in ("ntfy", "email", "telegram"):
+        cfg = notifications.get(kind, {})
+        if notification_configured(kind, settings) and notification_monitor_enabled(cfg, "start"):
+            return True
+    return False
+
+
+def wait_for_api_ready(job_id, item):
+    name = item["name"]
+    url = api_models_url(item)
+    timeout = max(0, START_NOTIFICATION_API_TIMEOUT)
+    deadline = time.time() + timeout
+    append_job(job_id, f"Warte auf API bereit fuer Start-Benachrichtigung: {url}")
+    while True:
+        if container_running(name) and api_status_ready(item):
+            record_api_ready(name)
+            append_job(job_id, f"API bereit: {url}")
+            return True
+        if not container_running(name):
+            append_job(job_id, "Start-Benachrichtigung nicht gesendet: Container laeuft nicht mehr.")
+            return False
+        if time.time() >= deadline:
+            append_job(job_id, f"Start-Benachrichtigung nicht gesendet: API nach {timeout}s nicht bereit.")
+            return False
+        time.sleep(2)
+
+
+def notify_container_start_when_ready(job_id, name, item):
+    if not start_notification_enabled(item):
+        return
+    if wait_for_api_ready(job_id, item):
+        notify_container_event(name, "start", "Start Container", item, job_id, api_ready=True)
+
+
 def job_start_container(job_id, name):
     item = find_config(name)
     if not item:
@@ -1167,6 +1581,7 @@ def job_start_container(job_id, name):
             if not container_running(name):
                 stream_command(job_id, ["docker", "start", name])
             append_job(job_id, "Container existierte bereits und wurde gestartet.")
+            notify_container_start_when_ready(job_id, name, item)
             return
         if container_hf_token(name) != item.get("hf_token", ""):
             append_job(job_id, "HF_TOKEN hat sich geaendert oder wurde wiederhergestellt. Container wird neu erstellt.")
@@ -1174,20 +1589,25 @@ def job_start_container(job_id, name):
     stream_command(job_id, ["docker", "pull", item["image"]])
     model_arg, extra_mounts = prepare_model(job_id, item)
     stream_command(job_id, build_run_args(item, model_arg, extra_mounts))
-    append_job(job_id, f"OpenAI Base URL: http://{local_ip()}:{item['port']}/v1")
+    append_job(job_id, f"OpenAI Base URL: {api_base_url(item)}")
+    notify_container_start_when_ready(job_id, name, item)
 
 
 def job_stop_container(job_id, name):
+    mark_expected_stop(name)
     finalize_runtime_tracking(name)
     if container_exists(name):
         stream_command(job_id, ["docker", "stop", name])
         clear_start_attempt(name)
         append_job(job_id, "Container gestoppt. Modell ist aus VRAM entladen.")
+        item = find_config(name)
+        notify_container_event(name, "stop", "Stop Container", item, job_id)
     else:
         append_job(job_id, "Container existiert nicht.")
 
 
 def job_remove_container(job_id, name, remove_cache=False):
+    mark_expected_stop(name)
     finalize_runtime_tracking(name)
     if container_exists(name):
         stream_command(job_id, ["docker", "rm", "-f", name])
@@ -1207,6 +1627,7 @@ def job_clear_model_cache(job_id, name):
         raise RuntimeError("Container-Konfiguration nicht gefunden")
     if container_running(name):
         append_job(job_id, "Container laeuft. Stoppe Container, damit Modell/VRAM freigegeben wird.")
+        mark_expected_stop(name)
         stream_command(job_id, ["docker", "stop", name])
     cache_dir = HF_CACHE_BASE / name
     if not cache_dir.exists():
@@ -1252,6 +1673,14 @@ def job_repair_nvidia(job_id):
 def local_ip():
     proc = run(["hostname", "-I"])
     return (proc.stdout.strip().split() or ["127.0.0.1"])[0]
+
+
+def api_base_url(item):
+    return f"http://{local_ip()}:{item['port']}/v1"
+
+
+def api_models_url(item):
+    return f"{api_base_url(item)}/models"
 
 
 def read_cpu_sample():
@@ -1515,6 +1944,24 @@ def diagnose_logs(logs):
     return ""
 
 
+def latest_throughput_for(name, status):
+    if status != "running":
+        return {}
+    logs = tail_logs(name, lines=120)
+    matches = list(THROUGHPUT_RE.finditer(logs))
+    if not matches:
+        return {}
+    match = matches[-1]
+    prompt = match.group(1)
+    generation = match.group(2)
+    return {
+        "prompt": prompt,
+        "generation": generation,
+        "label": f"{prompt} / {generation}",
+        "title": "Avg prompt throughput / Avg generation throughput",
+    }
+
+
 def docker_status_for(item):
     name = item["name"]
     status = "missing"
@@ -1522,21 +1969,23 @@ def docker_status_for(item):
         status = "running" if container_running(name) else "stopped"
     labels = container_labels(name) if status != "missing" else {}
     api_ready = api_status_ready(item) if status == "running" else False
-    api_url = f"http://{local_ip()}:{item['port']}/v1"
+    api_url = api_base_url(item)
     progress = download_progress_for(item, status, api_ready)
     diagnostic = diagnose_logs(tail_logs(name, lines=260)) if status != "missing" and not api_ready else ""
     startup_status = startup_status_for(name, status, api_ready)
     runtime_status = runtime_status_for(name, api_ready)
+    throughput_status = latest_throughput_for(name, status)
     model_size = model_size_for(item)
     return {
         "status": status,
         "api_status": "ready" if api_ready else "not_ready",
         "api_ready": api_ready,
         "api_url": api_url if api_ready else "",
-        "api_models_url": f"{api_url}/models" if api_ready else "",
+        "api_models_url": api_models_url(item) if api_ready else "",
         "diagnostic": diagnostic,
         "startup_status": startup_status,
         "runtime_status": runtime_status,
+        "throughput_status": throughput_status,
         "runtime_total_seconds": runtime_status["total_seconds"],
         "runtime_total_text": runtime_status["text"],
         "download_progress": progress,
@@ -1558,11 +2007,15 @@ def tail_logs(name, lines=160):
 
 def container_status():
     cfg_items = list_configured()
+    ui_settings = load_ui_settings()
+    notify_available = notifications_available(ui_settings)
     containers = []
     for item in cfg_items:
         merged = dict(item)
         merged.pop("hf_token", None)
         merged["hf_token_set"] = bool(item.get("hf_token"))
+        merged["notify"] = bool(item.get("notify"))
+        merged["notifications_available"] = notify_available
         merged.update(docker_status_for(item))
         containers.append(merged)
     containers.sort(key=lambda c: (int(c.get("port", 0)), c.get("name", "")))
@@ -1632,11 +2085,106 @@ def start_autostart_reconciler():
     thread.start()
 
 
+def maybe_notify_container_issue(item, status, api_ready):
+    name = item.get("name")
+    if not name:
+        return
+    with notification_lock:
+        state = notification_state.setdefault(name, {"was_running": False, "last_key": ""})
+
+    if not item.get("notify"):
+        with notification_lock:
+            state["was_running"] = status == "running"
+            state["last_key"] = ""
+        return
+
+    settings = load_ui_settings()
+    if not notifications_available(settings):
+        with notification_lock:
+            state["was_running"] = status == "running"
+            state["last_key"] = ""
+        return
+
+    if status == "running":
+        diagnostic = "" if api_ready else diagnose_logs(tail_logs(name, lines=260))
+        key = f"diagnostic:{diagnostic}" if diagnostic else ""
+        should_send = bool(diagnostic)
+        with notification_lock:
+            previous_key = state.get("last_key", "")
+            state["was_running"] = True
+            if not diagnostic:
+                state["last_key"] = ""
+        if should_send and key != previous_key:
+            title = f"vLLM Fehler: {name}"
+            send_configured_notifications(title, notification_message(name, diagnostic, item), settings)
+            with notification_lock:
+                state["last_key"] = key
+        return
+
+    with notification_lock:
+        was_running = bool(state.get("was_running"))
+        previous_key = state.get("last_key", "")
+        state["was_running"] = False
+    if not was_running or expected_stop(name):
+        return
+
+    reason = f"Container unerwartet beendet: {container_exit_summary(name)}"
+    key = f"crash:{reason}"
+    if key == previous_key:
+        return
+    title = f"vLLM Crash/Kill: {name}"
+    send_configured_notifications(title, notification_message(name, reason, item), settings)
+    with notification_lock:
+        state["last_key"] = key
+
+
+def maybe_notify_system_metrics(metrics, settings):
+    notifications = settings.get("notifications", {})
+    gpu = metrics.get("gpu", {})
+    ram = metrics.get("ram", {})
+    disks = displayed_disks(metrics, settings)
+    for kind in ("ntfy", "email", "telegram"):
+        cfg = notifications.get(kind, {})
+        if not notification_configured(kind, settings):
+            continue
+        monitors = cfg.get("monitors", {})
+        checks = [
+            ("temp", "temp", "Temp", gpu.get("temp"), "C"),
+            ("vram", "vram", "VRAM", gpu.get("vram_percent"), "%"),
+            ("ram", "ram", "RAM", ram.get("percent"), "%"),
+        ]
+        for monitor_type, metric_key, label, value, unit in checks:
+            monitor = monitors.get(monitor_type, {}) if isinstance(monitors.get(monitor_type), dict) else {}
+            if not monitor.get("enabled", False):
+                alert_transition_key(f"{kind}:{metric_key}:", False)
+                continue
+            try:
+                notify_metric_if_needed(kind, cfg, metric_key, monitor_type, label, value, monitor.get("limit", 0), unit)
+            except Exception as exc:
+                print(f"vLLM WebGUI notification failed for {kind}/{metric_key}: {exc}", flush=True)
+        disk_monitors = monitors.get("disks", {}) if isinstance(monitors.get("disks"), dict) else {}
+        for index, disk in enumerate(disks, start=1):
+            key = disk_key(disk)
+            monitor = disk_monitors.get(key, {}) if isinstance(disk_monitors.get(key), dict) else {}
+            label = f"HDD{index}"
+            state_key = f"{kind}:disk:{key}"
+            if not monitor.get("enabled", False):
+                alert_transition_key(state_key, False)
+                continue
+            try:
+                notify_metric_if_needed(kind, cfg, "disk", "disk", label, disk.get("percent"), monitor.get("limit", 0), "%", key)
+            except Exception as exc:
+                print(f"vLLM WebGUI notification failed for {kind}/disk {key}: {exc}", flush=True)
+
+
 def runtime_monitor_loop():
     interval = max(2, int(os.environ.get("VLLM_WEBGUI_RUNTIME_MONITOR_INTERVAL", "5") or 5))
     while True:
         try:
             if docker_daemon_ready():
+                settings = load_ui_settings()
+                metrics = system_metrics()
+                maybe_notify_system_metrics(metrics, settings)
                 for item in list_configured():
                     name = item.get("name")
                     if not name:
@@ -1645,10 +2193,12 @@ def runtime_monitor_loop():
                         api_ready = api_status_ready(item)
                         startup_status_for(name, "running", api_ready)
                         runtime_status_for(name, api_ready)
+                        maybe_notify_container_issue(item, "running", api_ready)
                     else:
                         status = "stopped" if container_exists(name) else "missing"
                         startup_status_for(name, status, False)
                         runtime_status_for(name, False)
+                        maybe_notify_container_issue(item, status, False)
         except Exception as exc:
             print(f"vLLM WebGUI runtime monitor failed: {exc}", flush=True)
         time.sleep(interval)
@@ -1719,6 +2269,8 @@ class Handler(SimpleHTTPRequestHandler):
                 item = validate_container(data, old_name=old_name)
                 if not item.get("hf_token") and old_item and old_item.get("hf_token"):
                     item["hf_token"] = old_item["hf_token"]
+                if "notify" not in data and old_item:
+                    item["notify"] = bool(old_item.get("notify"))
                 rename_cache_dir(old_name, item["name"])
                 rename_startup_stats(old_name, item["name"])
                 removed_cache = cleanup_stale_hf_cache(item)
@@ -1734,6 +2286,18 @@ class Handler(SimpleHTTPRequestHandler):
                 job_id = start_background("repair nvidia docker", job_repair_nvidia)
                 self.send_json({"ok": True, "job_id": job_id})
                 return
+            if parsed.path == "/api/notifications/test":
+                data = self.read_json()
+                kind = str(data.get("type", "")).strip()
+                notifications = normalize_notifications(data.get("notifications", {}))
+                cfg = notifications.get(kind, {})
+                if kind not in ("ntfy", "email", "telegram"):
+                    raise RuntimeError("Unbekannter Benachrichtigungs-Typ")
+                if not notification_configured(kind, {"notifications": {kind: cfg}}):
+                    raise RuntimeError("Benachrichtigung ist nicht vollstaendig eingerichtet")
+                send_notification(kind, cfg, "vLLM WebGUI Test", "Test-Benachrichtigung aus der vLLM WebGUI.")
+                self.send_json({"ok": True})
+                return
             if parsed.path == "/api/ui-settings":
                 settings = save_ui_settings(self.read_json())
                 self.send_json({"ok": True, "settings": settings})
@@ -1746,6 +2310,17 @@ class Handler(SimpleHTTPRequestHandler):
                     data = self.read_json()
                     seconds = int(data.get("seconds", 0) or 0)
                     self.send_json({"ok": True, "runtime_status": set_runtime_seconds(name, seconds)})
+                    return
+                if action == "notify":
+                    data = self.read_json()
+                    enabled = bool(data.get("enabled", False))
+                    if enabled and not notifications_available():
+                        raise RuntimeError("Erst Benachrichtigungen in den Einstellungen einrichten")
+                    notify_state = set_container_notify(name, enabled)
+                    item = find_config(name)
+                    event = "Container Benachrichtigung aktiviert" if notify_state else "Container Benachrichtigung deaktiviert"
+                    notify_container_event(name, "notify_toggle", event, item, require_container_notify=False)
+                    self.send_json({"ok": True, "notify": notify_state})
                     return
                 if action == "start":
                     job_id = start_background(f"start {name}", job_start_container, name)

@@ -253,6 +253,71 @@
           </select>
         </label>
       </div>
+      <h2 class="modal-subtitle">Durchsatz Anzeige</h2>
+      <div class="settings-checks">
+        <label class="disk-option">
+          <input id="showThroughputInput" type="checkbox">
+          <span><strong>Avg prompt/generation anzeigen (unter Container Name)</strong></span>
+        </label>
+      </div>
+      <h2 class="modal-subtitle">Benachrichtigungen</h2>
+      <div class="notification-settings">
+        <details>
+          <summary><span><input id="ntfyEnabledInput" type="checkbox"> NTFY aktiv</span></summary>
+          <div class="notification-fields">
+            <label class="monitor-check"><input data-monitor-type="ntfy" data-monitor-enabled="error" type="checkbox"> Fehler</label>
+            <label class="monitor-check"><input data-monitor-type="ntfy" data-monitor-enabled="start" type="checkbox"> Start Container</label>
+            <label class="monitor-check"><input data-monitor-type="ntfy" data-monitor-enabled="stop" type="checkbox"> Stop Container</label>
+            <label class="monitor-check"><input data-monitor-type="ntfy" data-monitor-enabled="notify_toggle" type="checkbox"> Container Benachrichtigung Aktiviert/Deaktiviert</label>
+            <label class="monitor-row"><span><input data-monitor-type="ntfy" data-monitor-enabled="temp" type="checkbox"> Temp &gt;</span><input data-monitor-type="ntfy" data-monitor-limit="temp" type="number" min="1" max="120" step="1"><span>C</span></label>
+            <label class="monitor-row"><span><input data-monitor-type="ntfy" data-monitor-enabled="vram" type="checkbox"> VRAM &gt;</span><input data-monitor-type="ntfy" data-monitor-limit="vram" type="number" min="1" max="100" step="1"><span>%</span></label>
+            <label class="monitor-row"><span><input data-monitor-type="ntfy" data-monitor-enabled="ram" type="checkbox"> RAM &gt;</span><input data-monitor-type="ntfy" data-monitor-limit="ram" type="number" min="1" max="100" step="1"><span>%</span></label>
+            <div id="ntfyDiskLimits" class="notification-disk-limits"></div>
+            <input id="ntfyServerInput" type="url" placeholder="http://192.168.1.21:22280/ - https://192.168.10.211/">
+            <input id="ntfyTopicInput" type="text" placeholder="Topic">
+            <input id="ntfyTokenInput" type="password" placeholder="Token optional">
+            <button type="button" id="ntfyTestBtn" class="secondary">NTFY testen</button>
+          </div>
+        </details>
+        <details>
+          <summary><span><input id="telegramEnabledInput" type="checkbox"> Telegram aktiv</span></summary>
+          <div class="notification-fields">
+            <label class="monitor-check"><input data-monitor-type="telegram" data-monitor-enabled="error" type="checkbox"> Fehler</label>
+            <label class="monitor-check"><input data-monitor-type="telegram" data-monitor-enabled="start" type="checkbox"> Start Container</label>
+            <label class="monitor-check"><input data-monitor-type="telegram" data-monitor-enabled="stop" type="checkbox"> Stop Container</label>
+            <label class="monitor-check"><input data-monitor-type="telegram" data-monitor-enabled="notify_toggle" type="checkbox"> Container Benachrichtigung Aktiviert/Deaktiviert</label>
+            <label class="monitor-row"><span><input data-monitor-type="telegram" data-monitor-enabled="temp" type="checkbox"> Temp &gt;</span><input data-monitor-type="telegram" data-monitor-limit="temp" type="number" min="1" max="120" step="1"><span>C</span></label>
+            <label class="monitor-row"><span><input data-monitor-type="telegram" data-monitor-enabled="vram" type="checkbox"> VRAM &gt;</span><input data-monitor-type="telegram" data-monitor-limit="vram" type="number" min="1" max="100" step="1"><span>%</span></label>
+            <label class="monitor-row"><span><input data-monitor-type="telegram" data-monitor-enabled="ram" type="checkbox"> RAM &gt;</span><input data-monitor-type="telegram" data-monitor-limit="ram" type="number" min="1" max="100" step="1"><span>%</span></label>
+            <div id="telegramDiskLimits" class="notification-disk-limits"></div>
+            <input id="telegramBotTokenInput" type="password" placeholder="Bot Token">
+            <input id="telegramChatIdInput" type="text" placeholder="Chat ID">
+            <button type="button" id="telegramTestBtn" class="secondary">Telegram testen</button>
+          </div>
+        </details>
+        <details>
+          <summary><span><input id="emailEnabledInput" type="checkbox"> eMail aktiv</span></summary>
+          <div class="notification-fields">
+            <label class="monitor-check"><input data-monitor-type="email" data-monitor-enabled="error" type="checkbox"> Fehler</label>
+            <label class="monitor-check"><input data-monitor-type="email" data-monitor-enabled="start" type="checkbox"> Start Container</label>
+            <label class="monitor-check"><input data-monitor-type="email" data-monitor-enabled="stop" type="checkbox"> Stop Container</label>
+            <label class="monitor-check"><input data-monitor-type="email" data-monitor-enabled="notify_toggle" type="checkbox"> Container Benachrichtigung Aktiviert/Deaktiviert</label>
+            <label class="monitor-row"><span><input data-monitor-type="email" data-monitor-enabled="temp" type="checkbox"> Temp &gt;</span><input data-monitor-type="email" data-monitor-limit="temp" type="number" min="1" max="120" step="1"><span>C</span></label>
+            <label class="monitor-row"><span><input data-monitor-type="email" data-monitor-enabled="vram" type="checkbox"> VRAM &gt;</span><input data-monitor-type="email" data-monitor-limit="vram" type="number" min="1" max="100" step="1"><span>%</span></label>
+            <label class="monitor-row"><span><input data-monitor-type="email" data-monitor-enabled="ram" type="checkbox"> RAM &gt;</span><input data-monitor-type="email" data-monitor-limit="ram" type="number" min="1" max="100" step="1"><span>%</span></label>
+            <div id="emailDiskLimits" class="notification-disk-limits"></div>
+            <input id="emailSmtpHostInput" type="text" placeholder="SMTP Host">
+            <input id="emailSmtpPortInput" type="number" min="1" max="65535" step="1" placeholder="587">
+            <input id="emailUsernameInput" type="text" placeholder="Benutzer optional">
+            <input id="emailPasswordInput" type="password" placeholder="Passwort optional">
+            <input id="emailFromInput" type="email" placeholder="Absender">
+            <input id="emailToInput" type="email" placeholder="Empfaenger">
+            <span class="compact-check"><input id="emailTlsInput" type="checkbox"> STARTTLS</span>
+            <span class="compact-check"><input id="emailSslInput" type="checkbox"> SSL/TLS</span>
+            <button type="button" id="emailTestBtn" class="secondary">eMail testen</button>
+          </div>
+        </details>
+      </div>
       <div class="actions modal-actions">
         <button type="button" id="settingsModalSaveBtn">Uebernehmen</button>
         <button type="button" id="settingsModalResetBtn" class="secondary">Standard</button>

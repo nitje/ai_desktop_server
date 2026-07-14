@@ -224,7 +224,9 @@ label {
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  max-height: calc(100vh - 40px);
   max-width: 560px;
+  overflow: auto;
   padding: 16px;
   position: relative;
   width: min(560px, 100%);
@@ -249,10 +251,10 @@ label {
   border-radius: 8px;
   color: var(--text);
   display: grid;
-  gap: 10px;
+  gap: 7px;
   grid-template-columns: auto 1fr;
   margin: 0;
-  padding: 10px;
+  padding: 7px 9px;
 }
 
 .disk-option input {
@@ -263,6 +265,10 @@ label {
   display: grid;
   gap: 2px;
   min-width: 0;
+}
+
+.disk-option strong {
+  font-size: 13px;
 }
 
 .settings-grid {
@@ -290,12 +296,91 @@ label {
   margin: 16px 0 10px;
 }
 
+.notification-settings {
+  display: grid;
+  gap: 8px;
+}
+
+.notification-settings details {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0;
+}
+
+.notification-settings summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  font-weight: 700;
+  justify-content: space-between;
+  list-style-position: inside;
+  padding: 8px 10px;
+}
+
+.notification-settings summary span,
+.compact-check {
+  align-items: center;
+  display: inline-flex;
+  gap: 7px;
+}
+
+.notification-fields {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.monitor-check,
+.monitor-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.monitor-check {
+  grid-template-columns: auto 1fr;
+}
+
+.monitor-row {
+  grid-template-columns: minmax(88px, 1fr) 74px auto;
+}
+
+.monitor-row span,
+.monitor-check {
+  font-size: 13px;
+}
+
+.monitor-row span:first-child {
+  align-items: center;
+  display: inline-flex;
+  gap: 7px;
+}
+
+.notification-disk-limits {
+  display: grid;
+  gap: 8px;
+}
+
+.notification-fields input:not([type="checkbox"]),
+.notification-fields button {
+  width: 100%;
+}
+
 input, select, button {
   min-height: 36px;
   border-radius: 6px;
   border: 1px solid var(--line);
   padding: 7px 10px;
   font: inherit;
+}
+
+input[type="checkbox"] {
+  height: 14px;
+  min-height: 14px;
+  padding: 0;
+  width: 14px;
 }
 
 button {
@@ -314,6 +399,17 @@ button.secondary {
 button.danger {
   background: var(--danger);
   border-color: var(--danger);
+}
+
+button.notify-enabled {
+  background: #12824b;
+  border-color: #12824b;
+  color: #fff;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 button.icon-button {
@@ -603,6 +699,18 @@ small.diagnostic {
   white-space: nowrap;
 }
 
+.throughput-line {
+  color: var(--muted);
+  cursor: help;
+  display: block;
+  font-size: 12px;
+  margin-top: 2px;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .runtime-edit {
   align-items: center;
   display: inline-grid;
@@ -743,6 +851,13 @@ button.runtime-save {
   text-shadow: 0 0 8px rgba(255, 0, 60, 0.85);
 }
 
+:root[data-design="neonsys-cyberpunk"] button.notify-enabled {
+  background: rgba(0, 255, 65, 0.14);
+  border-color: #00ff41;
+  color: #00ff41;
+  text-shadow: 0 0 8px rgba(0, 255, 65, 0.85);
+}
+
 :root[data-design="neonsys-cyberpunk"] th:nth-child(9),
 :root[data-design="neonsys-cyberpunk"] td:nth-child(9) {
   width: 370px;
@@ -822,6 +937,7 @@ button.runtime-save {
 :root[data-design="neonsys-cyberpunk"] #jobLine,
 :root[data-design="neonsys-cyberpunk"] .startup-line,
 :root[data-design="neonsys-cyberpunk"] .runtime-line,
+:root[data-design="neonsys-cyberpunk"] .throughput-line,
 :root[data-design="neonsys-cyberpunk"] small {
   color: #80f3ff;
 }
@@ -897,7 +1013,8 @@ button.runtime-save {
 :root[data-design="aurora-mesh-gradient"] small,
 :root[data-design="aurora-mesh-gradient"] #jobLine,
 :root[data-design="aurora-mesh-gradient"] .startup-line,
-:root[data-design="aurora-mesh-gradient"] .runtime-line {
+:root[data-design="aurora-mesh-gradient"] .runtime-line,
+:root[data-design="aurora-mesh-gradient"] .throughput-line {
   color: #e0f8ff;
 }
 
@@ -938,6 +1055,11 @@ button.runtime-save {
 :root[data-design="aurora-mesh-gradient"] button.danger {
   background: linear-gradient(135deg, #ff4fa3, #bc13fe);
   border-color: rgba(255, 79, 163, 0.7);
+}
+
+:root[data-design="aurora-mesh-gradient"] button.notify-enabled {
+  background: linear-gradient(135deg, #19c37d, #00f2ff);
+  border-color: rgba(25, 195, 125, 0.72);
 }
 
 :root[data-design="aurora-mesh-gradient"] th {
@@ -1130,6 +1252,11 @@ button.runtime-save {
   border-color: rgba(255, 255, 255, 0.32);
 }
 
+:root[data-design="aura-glassmorphism"] button.notify-enabled {
+  background: linear-gradient(135deg, rgba(25, 195, 125, 0.92), rgba(0, 212, 255, 0.82));
+  border-color: rgba(255, 255, 255, 0.34);
+}
+
 :root[data-design="aura-glassmorphism"] th {
   color: #f0f0f0;
 }
@@ -1189,7 +1316,8 @@ button.runtime-save {
 :root[data-design="aura-glassmorphism"] small,
 :root[data-design="aura-glassmorphism"] #jobLine,
 :root[data-design="aura-glassmorphism"] .startup-line,
-:root[data-design="aura-glassmorphism"] .runtime-line {
+:root[data-design="aura-glassmorphism"] .runtime-line,
+:root[data-design="aura-glassmorphism"] .throughput-line {
   color: #e0e0e0;
 }
 
